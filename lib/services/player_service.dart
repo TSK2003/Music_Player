@@ -1,6 +1,6 @@
+import 'dart:math';
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/material.dart';
-import 'package:just_audio/just_audio.dart';
 import 'package:rxdart/rxdart.dart';
 import '../models/song_model.dart';
 import 'audio_handler.dart';
@@ -16,8 +16,10 @@ class PositionData {
 
 class PlayerService extends ChangeNotifier {
   final AudioPlayerHandler audioHandler;
-  
+
   List<SongModel> _songs = [];
+  List<SongModel> _currentPlaylist = [];
+  int _currentIndex = -1;
   SongModel? _currentSong;
   bool _isLoading = false;
   String? _error;
@@ -26,6 +28,7 @@ class PlayerService extends ChangeNotifier {
   // Shuffle & Repeat state
   bool _shuffleEnabled = false;
   LoopMode _loopMode = LoopMode.off;
+  List<int>? _shuffleOrder;
 
   PlayerService(this.audioHandler);
 
@@ -35,9 +38,10 @@ class PlayerService extends ChangeNotifier {
   bool get isLoading => _isLoading;
   String? get error => _error;
   bool get isInitialized => _isInitialized;
-  AudioPlayer get player => audioHandler.player;
   bool get shuffleEnabled => _shuffleEnabled;
   LoopMode get loopMode => _loopMode;
+  bool get hasPrevious => _currentPlaylist.isNotEmpty;
+  bool get hasNext => _currentPlaylist.isNotEmpty;
 
   /// Stream of playing state
   Stream<bool> get playingStream => audioHandler.playbackState
@@ -70,7 +74,7 @@ class PlayerService extends ChangeNotifier {
   /// Current media item stream
   Stream<MediaItem?> get mediaItemStream => audioHandler.mediaItem;
 
-  /// Set the song list (appends to existing if merging)
+  /// Set the song list
   void setSongs(List<SongModel> songs) {
     _songs = songs;
     _isInitialized = true;
@@ -79,7 +83,6 @@ class PlayerService extends ChangeNotifier {
 
   /// Add songs to the existing list (for local files)
   void addSongs(List<SongModel> newSongs) {
-    // Avoid duplicates by checking IDs
     final existingIds = _songs.map((s) => s.id).toSet();
     final unique = newSongs.where((s) => !existingIds.contains(s.id)).toList();
     _songs.addAll(unique);
@@ -87,41 +90,38 @@ class PlayerService extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Play a song from the list
+  /// Play a song — loads single song, keeps playlist reference for next/prev
   Future<void> playSong(SongModel song, {List<SongModel>? playlist}) async {
     try {
       _isLoading = true;
       _error = null;
       _currentSong = song;
+      _currentPlaylist = playlist ?? _songs;
+      _currentIndex = _currentPlaylist.indexWhere((s) => s.id == song.id);
       notifyListeners();
 
-      final songsToPlay = playlist ?? _songs;
-      final index = songsToPlay.indexWhere((s) => s.id == song.id);
-      if (index == -1) return;
+      if (_currentIndex == -1) {
+        _currentIndex = 0;
+      }
 
-      // Convert to MediaItems
-      final mediaItems = songsToPlay
-          .map((s) => MediaItem(
-                id: s.streamUrl,
-                album: s.isLocal ? 'Local Music' : 'Music Player',
-                title: s.title,
-                artist: s.artist,
-                artUri: null,
-                extras: {
-                  'songId': s.id,
-                  'artColor': s.artColor.toARGB32(),
-                  'artColorSecondary': s.artColorSecondary.toARGB32(),
-                  'isLocal': s.isLocal,
-                },
-              ))
-          .toList();
+      // Build shuffle order if needed
+      if (_shuffleEnabled) {
+        _buildShuffleOrder();
+      }
 
-      await audioHandler.loadPlaylist(mediaItems, initialIndex: index);
+      final mediaItem = MediaItem(
+        id: song.streamUrl,
+        album: song.isLocal ? 'Local Music' : 'Music Player',
+        title: song.title,
+        artist: song.artist,
+        artUri: null,
+        extras: {
+          'songId': song.id,
+          'isLocal': song.isLocal,
+        },
+      );
 
-      // Apply current shuffle/repeat settings
-      await audioHandler.player.setShuffleModeEnabled(_shuffleEnabled);
-      await audioHandler.player.setLoopMode(_loopMode);
-
+      await audioHandler.loadSingle(mediaItem);
       await audioHandler.play();
 
       _isLoading = false;
@@ -129,6 +129,7 @@ class PlayerService extends ChangeNotifier {
     } catch (e) {
       _isLoading = false;
       _error = 'Failed to play: ${e.toString()}';
+      debugPrint('[PlayerService] Error: $_error');
       notifyListeners();
     }
   }
@@ -147,27 +148,83 @@ class PlayerService extends ChangeNotifier {
     await audioHandler.seek(position);
   }
 
-  /// Skip to next
+  /// Skip to next song
   Future<void> next() async {
-    await audioHandler.skipToNext();
-    _updateCurrentSongFromIndex();
+    if (_currentPlaylist.isEmpty) return;
+
+    int nextIndex;
+    if (_shuffleEnabled && _shuffleOrder != null) {
+      final shufflePos = _shuffleOrder!.indexOf(_currentIndex);
+      final nextShufflePos = (shufflePos + 1) % _shuffleOrder!.length;
+      nextIndex = _shuffleOrder![nextShufflePos];
+    } else {
+      nextIndex = (_currentIndex + 1) % _currentPlaylist.length;
+    }
+
+    // If loop is off and we've wrapped around, stop
+    if (!_shuffleEnabled && nextIndex == 0 && _loopMode == LoopMode.off) {
+      return;
+    }
+
+    // If loop one, replay current
+    if (_loopMode == LoopMode.one) {
+      await seekTo(Duration.zero);
+      await audioHandler.play();
+      return;
+    }
+
+    _currentIndex = nextIndex;
+    final nextSong = _currentPlaylist[_currentIndex];
+    await playSong(nextSong, playlist: _currentPlaylist);
   }
 
-  /// Skip to previous
+  /// Skip to previous song
   Future<void> previous() async {
-    await audioHandler.skipToPrevious();
-    _updateCurrentSongFromIndex();
+    if (_currentPlaylist.isEmpty) return;
+
+    // If more than 3 seconds in, restart current song
+    if (audioHandler.player.position.inSeconds > 3) {
+      await seekTo(Duration.zero);
+      return;
+    }
+
+    int prevIndex;
+    if (_shuffleEnabled && _shuffleOrder != null) {
+      final shufflePos = _shuffleOrder!.indexOf(_currentIndex);
+      final prevShufflePos =
+          (shufflePos - 1 + _shuffleOrder!.length) % _shuffleOrder!.length;
+      prevIndex = _shuffleOrder![prevShufflePos];
+    } else {
+      prevIndex =
+          (_currentIndex - 1 + _currentPlaylist.length) % _currentPlaylist.length;
+    }
+
+    _currentIndex = prevIndex;
+    final prevSong = _currentPlaylist[_currentIndex];
+    await playSong(prevSong, playlist: _currentPlaylist);
   }
 
   /// Toggle shuffle mode
-  Future<void> toggleShuffle() async {
+  void toggleShuffle() {
     _shuffleEnabled = !_shuffleEnabled;
-    await audioHandler.player.setShuffleModeEnabled(_shuffleEnabled);
+    if (_shuffleEnabled) {
+      _buildShuffleOrder();
+    } else {
+      _shuffleOrder = null;
+    }
     notifyListeners();
   }
 
+  /// Build a random shuffle order starting from current index
+  void _buildShuffleOrder() {
+    final indices = List.generate(_currentPlaylist.length, (i) => i);
+    indices.remove(_currentIndex);
+    indices.shuffle(Random());
+    _shuffleOrder = [_currentIndex, ...indices];
+  }
+
   /// Cycle loop mode: off → all → one → off
-  Future<void> cycleLoopMode() async {
+  void cycleLoopMode() {
     switch (_loopMode) {
       case LoopMode.off:
         _loopMode = LoopMode.all;
@@ -179,24 +236,14 @@ class PlayerService extends ChangeNotifier {
         _loopMode = LoopMode.off;
         break;
     }
-    await audioHandler.player.setLoopMode(_loopMode);
     notifyListeners();
   }
 
-  void _updateCurrentSongFromIndex() {
-    final index = audioHandler.player.currentIndex;
-    if (index != null && index < _songs.length) {
-      _currentSong = _songs[index];
-      notifyListeners();
-    }
-  }
-
-  /// Listen to index changes and update current song
+  /// Listen for song completion to auto-advance
   void startListening() {
-    audioHandler.player.currentIndexStream.listen((index) {
-      if (index != null && index < _songs.length) {
-        _currentSong = _songs[index];
-        notifyListeners();
+    audioHandler.playbackState.listen((state) {
+      if (state.processingState == AudioProcessingState.completed) {
+        next();
       }
     });
   }
@@ -207,3 +254,6 @@ class PlayerService extends ChangeNotifier {
     super.dispose();
   }
 }
+
+/// Loop modes
+enum LoopMode { off, all, one }

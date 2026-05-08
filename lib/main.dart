@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 import 'services/audio_handler.dart';
 import 'services/favorites_service.dart';
 import 'services/player_service.dart';
+import 'services/theme_service.dart';
 import 'screens/home_screen.dart';
 import 'theme/app_theme.dart';
 
@@ -49,17 +50,28 @@ Future<void> main() async {
     ),
   );
 
-  // Pre-load favorites
+  // Pre-load preferences
   final favoritesService = FavoritesService();
   await favoritesService.load();
 
-  runApp(MusicPlayerApp(favoritesService: favoritesService));
+  final themeService = ThemeService();
+  await themeService.load();
+
+  runApp(MusicPlayerApp(
+    favoritesService: favoritesService,
+    themeService: themeService,
+  ));
 }
 
 class MusicPlayerApp extends StatelessWidget {
   final FavoritesService favoritesService;
+  final ThemeService themeService;
 
-  const MusicPlayerApp({super.key, required this.favoritesService});
+  const MusicPlayerApp({
+    super.key,
+    required this.favoritesService,
+    required this.themeService,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -73,12 +85,19 @@ class MusicPlayerApp extends StatelessWidget {
           },
         ),
         ChangeNotifierProvider.value(value: favoritesService),
+        ChangeNotifierProvider.value(value: themeService),
       ],
-      child: MaterialApp(
-        title: 'Music Player',
-        debugShowCheckedModeBanner: false,
-        theme: AppTheme.darkTheme,
-        home: const HomeScreen(),
+      child: Consumer<ThemeService>(
+        builder: (context, theme, _) {
+          return MaterialApp(
+            title: 'Music Player',
+            debugShowCheckedModeBanner: false,
+            theme: AppTheme.lightTheme,
+            darkTheme: AppTheme.darkTheme,
+            themeMode: theme.themeMode,
+            home: const HomeScreen(),
+          );
+        },
       ),
     );
   }

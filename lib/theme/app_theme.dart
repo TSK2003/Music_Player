@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 class AppColors {
-  // Core palette
+  // Core dark palette
   static const Color background = Color(0xFF0A0A0F);
   static const Color surface = Color(0xFF12121A);
   static const Color surfaceLight = Color(0xFF1A1A2E);
@@ -17,6 +17,16 @@ class AppColors {
   static const Color glassBorder = Color(0x22FFFFFF);
   static const Color glassFill = Color(0x0DFFFFFF);
   static const Color glassHighlight = Color(0x15FFFFFF);
+
+  // Light palette
+  static const Color lightBackground = Color(0xFFF5F5FA);
+  static const Color lightSurface = Color(0xFFFFFFFF);
+  static const Color lightSurfaceLight = Color(0xFFEEEEF5);
+  static const Color lightTextPrimary = Color(0xFF1A1A2E);
+  static const Color lightTextSecondary = Color(0xFF666680);
+  static const Color lightTextMuted = Color(0xFF999AAA);
+  static const Color lightGlassBorder = Color(0x15000000);
+  static const Color lightGlassFill = Color(0x0A000000);
 
   // Gradients
   static const LinearGradient backgroundGradient = LinearGradient(
@@ -138,6 +148,77 @@ class AppTheme {
             fontSize: 14,
             fontWeight: FontWeight.w600,
             color: AppColors.textPrimary,
+            letterSpacing: 0.5,
+          ),
+        ),
+      ),
+      appBarTheme: const AppBarTheme(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+      ),
+      useMaterial3: true,
+    );
+  }
+
+  static ThemeData get lightTheme {
+    return ThemeData(
+      brightness: Brightness.light,
+      scaffoldBackgroundColor: AppColors.lightBackground,
+      primaryColor: AppColors.neonBlue,
+      colorScheme: const ColorScheme.light(
+        primary: AppColors.neonBlue,
+        secondary: AppColors.neonPurple,
+        surface: AppColors.lightSurface,
+        error: AppColors.accentPink,
+      ),
+      textTheme: GoogleFonts.interTextTheme(
+        const TextTheme(
+          displayLarge: TextStyle(
+            fontSize: 32,
+            fontWeight: FontWeight.w700,
+            color: AppColors.lightTextPrimary,
+            letterSpacing: -1.0,
+          ),
+          displayMedium: TextStyle(
+            fontSize: 24,
+            fontWeight: FontWeight.w600,
+            color: AppColors.lightTextPrimary,
+            letterSpacing: -0.5,
+          ),
+          headlineMedium: TextStyle(
+            fontSize: 20,
+            fontWeight: FontWeight.w600,
+            color: AppColors.lightTextPrimary,
+          ),
+          titleLarge: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.w600,
+            color: AppColors.lightTextPrimary,
+          ),
+          titleMedium: TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.w500,
+            color: AppColors.lightTextPrimary,
+          ),
+          bodyLarge: TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.w400,
+            color: AppColors.lightTextPrimary,
+          ),
+          bodyMedium: TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w400,
+            color: AppColors.lightTextSecondary,
+          ),
+          bodySmall: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w400,
+            color: AppColors.lightTextMuted,
+          ),
+          labelLarge: TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+            color: AppColors.lightTextPrimary,
             letterSpacing: 0.5,
           ),
         ),

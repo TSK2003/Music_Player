@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:just_audio/just_audio.dart';
+
 import 'package:provider/provider.dart';
 import '../models/song_model.dart';
 import '../services/favorites_service.dart';
 import '../services/player_service.dart';
+import '../services/theme_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/glow_button.dart';
 import '../widgets/neon_seek_bar.dart';
@@ -50,13 +51,14 @@ class _PlayerScreenState extends State<PlayerScreen>
     final currentSong = playerService.currentSong;
 
     if (currentSong == null) {
-      return const Scaffold(
-        body: Center(child: Text('No song selected')),
+      return Scaffold(
+        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+        body: const Center(child: Text('No song selected')),
       );
     }
 
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: AnimatedBackground(
         accentColor: currentSong.artColor,
         child: SafeArea(
@@ -66,22 +68,22 @@ class _PlayerScreenState extends State<PlayerScreen>
               children: [
                 // Top bar
                 _buildTopBar(context, currentSong),
-                const Spacer(flex: 1),
+                const Spacer(flex: 2),
                 // Album art
-                _buildAlbumArt(currentSong),
-                const SizedBox(height: 36),
+                _buildAlbumArt(context, currentSong),
+                const Spacer(flex: 2),
                 // Song info
                 _buildSongInfo(context, currentSong),
-                const SizedBox(height: 32),
+                const Spacer(flex: 2),
                 // Seek bar
                 _buildSeekBar(playerService, currentSong),
-                const SizedBox(height: 24),
-                // Controls
-                _buildControls(playerService),
-                const SizedBox(height: 24),
-                // Waveform
-                _buildWaveform(playerService, currentSong),
                 const Spacer(flex: 1),
+                // Controls
+                _buildControls(context, playerService),
+                const Spacer(flex: 1),
+                // Waveform
+                _buildWaveform(context, playerService, currentSong),
+                const Spacer(flex: 2),
               ],
             ),
           ),
@@ -92,7 +94,9 @@ class _PlayerScreenState extends State<PlayerScreen>
 
   Widget _buildTopBar(BuildContext context, SongModel song) {
     final favoritesService = context.watch<FavoritesService>();
+    final themeService = context.watch<ThemeService>();
     final isFavorite = favoritesService.isFavorite(song.id);
+    final isDark = themeService.isDark;
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -107,15 +111,15 @@ class _PlayerScreenState extends State<PlayerScreen>
               height: 44,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: Colors.white.withValues(alpha: 0.08),
+                color: isDark ? Colors.white.withValues(alpha: 0.08) : Colors.black.withValues(alpha: 0.05),
                 border: Border.all(
-                  color: AppColors.glassBorder,
+                  color: isDark ? AppColors.glassBorder : AppColors.lightGlassBorder,
                   width: 1,
                 ),
               ),
-              child: const Icon(
+              child: Icon(
                 Icons.keyboard_arrow_down_rounded,
-                color: AppColors.textPrimary,
+                color: Theme.of(context).textTheme.bodyLarge?.color,
                 size: 28,
               ),
             ),
@@ -129,7 +133,6 @@ class _PlayerScreenState extends State<PlayerScreen>
                       letterSpacing: 2,
                       fontSize: 10,
                       fontWeight: FontWeight.w600,
-                      color: AppColors.textMuted,
                     ),
               ),
             ],
@@ -142,11 +145,11 @@ class _PlayerScreenState extends State<PlayerScreen>
               height: 44,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: Colors.white.withValues(alpha: 0.08),
+                color: isDark ? Colors.white.withValues(alpha: 0.08) : Colors.black.withValues(alpha: 0.05),
                 border: Border.all(
                   color: isFavorite
                       ? AppColors.accentPink.withValues(alpha: 0.4)
-                      : AppColors.glassBorder,
+                      : (isDark ? AppColors.glassBorder : AppColors.lightGlassBorder),
                   width: 1,
                 ),
               ),
@@ -156,7 +159,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                     : Icons.favorite_border_rounded,
                 color: isFavorite
                     ? AppColors.accentPink
-                    : AppColors.textPrimary,
+                    : Theme.of(context).textTheme.bodyLarge?.color,
                 size: 20,
               ),
             ),
@@ -166,11 +169,11 @@ class _PlayerScreenState extends State<PlayerScreen>
     );
   }
 
-  Widget _buildAlbumArt(SongModel song) {
+  Widget _buildAlbumArt(BuildContext context, SongModel song) {
+    final isDark = context.watch<ThemeService>().isDark;
+
     return Center(
-      child: Hero(
-        tag: 'album_art_${song.id}',
-        child: StreamBuilder<bool>(
+      child: StreamBuilder<bool>(
           stream: context.read<PlayerService>().playingStream,
           builder: (context, snapshot) {
             final isPlaying = snapshot.data ?? false;
@@ -198,12 +201,13 @@ class _PlayerScreenState extends State<PlayerScreen>
                     blurRadius: isPlaying ? 50 : 30,
                     spreadRadius: isPlaying ? 8 : 4,
                   ),
-                  BoxShadow(
-                    color: song.artColorSecondary.withValues(alpha: 0.2),
-                    blurRadius: 60,
-                    spreadRadius: 2,
-                    offset: const Offset(20, 20),
-                  ),
+                  if (isDark)
+                    BoxShadow(
+                      color: song.artColorSecondary.withValues(alpha: 0.2),
+                      blurRadius: 60,
+                      spreadRadius: 2,
+                      offset: const Offset(20, 20),
+                    ),
                 ],
               ),
               child: ClipRRect(
@@ -276,9 +280,12 @@ class _PlayerScreenState extends State<PlayerScreen>
                               const SizedBox(width: 4),
                               Text(
                                 'LOCAL',
-                                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .bodySmall
+                                    ?.copyWith(
                                       color: AppColors.accentCyan,
-                                      fontSize: 9,
+                                      fontSize: 10,
                                       fontWeight: FontWeight.w700,
                                       letterSpacing: 1,
                                     ),
@@ -293,7 +300,6 @@ class _PlayerScreenState extends State<PlayerScreen>
             );
           },
         ),
-      ),
     );
   }
 
@@ -313,7 +319,7 @@ class _PlayerScreenState extends State<PlayerScreen>
           Text(
             song.artist,
             style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                  color: AppColors.textSecondary,
+                  color: Theme.of(context).textTheme.bodySmall?.color,
                 ),
             textAlign: TextAlign.center,
             maxLines: 1,
@@ -344,71 +350,80 @@ class _PlayerScreenState extends State<PlayerScreen>
     );
   }
 
-  Widget _buildControls(PlayerService playerService) {
-    return StreamBuilder<bool>(
-      stream: playerService.playingStream,
-      builder: (context, snapshot) {
-        final isPlaying = snapshot.data ?? false;
-        final shuffleOn = playerService.shuffleEnabled;
-        final loopMode = playerService.loopMode;
+  Widget _buildControls(BuildContext context, PlayerService playerService) {
+    final isDark = context.watch<ThemeService>().isDark;
 
-        return Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            // Shuffle — now functional
-            _ShuffleButton(
-              isActive: shuffleOn,
-              onPressed: () => playerService.toggleShuffle(),
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 32),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        children: [
+          // Shuffle
+          _ShuffleButton(
+            isShuffleModeEnabled: playerService.shuffleEnabled,
+            onPressed: () => playerService.toggleShuffle(),
+            isDark: isDark,
+          ),
+          // Previous
+          GestureDetector(
+            onTap: playerService.hasPrevious ? playerService.previous : null,
+            child: Icon(
+              Icons.skip_previous_rounded,
+              color: playerService.hasPrevious
+                  ? Theme.of(context).textTheme.bodyLarge?.color
+                  : Theme.of(context).textTheme.bodySmall?.color,
+              size: 42,
             ),
-            const SizedBox(width: 20),
-            // Previous
-            ControlButton(
-              icon: Icons.skip_previous_rounded,
-              size: 52,
-              onPressed: () => playerService.previous(),
+          ),
+          // Play/Pause
+          StreamBuilder<bool>(
+            stream: playerService.playingStream,
+            builder: (context, snapshot) {
+              final isPlaying = snapshot.data ?? false;
+              final song = playerService.currentSong;
+              return GlowButton(
+                icon: isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                color: song?.artColor ?? AppColors.neonBlue,
+                onPressed: playerService.togglePlayPause,
+                size: 76,
+              );
+            },
+          ),
+          // Next
+          GestureDetector(
+            onTap: playerService.hasNext ? playerService.next : null,
+            child: Icon(
+              Icons.skip_next_rounded,
+              color: playerService.hasNext
+                  ? Theme.of(context).textTheme.bodyLarge?.color
+                  : Theme.of(context).textTheme.bodySmall?.color,
+              size: 42,
             ),
-            const SizedBox(width: 20),
-            // Play/Pause
-            GlowButton(
-              icon: isPlaying
-                  ? Icons.pause_rounded
-                  : Icons.play_arrow_rounded,
-              size: 72,
-              color: playerService.currentSong?.artColor ?? AppColors.neonBlue,
-              enableGlow: isPlaying,
-              onPressed: () => playerService.togglePlayPause(),
-            ),
-            const SizedBox(width: 20),
-            // Next
-            ControlButton(
-              icon: Icons.skip_next_rounded,
-              size: 52,
-              onPressed: () => playerService.next(),
-            ),
-            const SizedBox(width: 20),
-            // Repeat — now functional
-            _RepeatButton(
-              loopMode: loopMode,
-              onPressed: () => playerService.cycleLoopMode(),
-            ),
-          ],
-        );
-      },
+          ),
+          // Repeat
+          _RepeatButton(
+            loopMode: playerService.loopMode,
+            onPressed: () => playerService.cycleLoopMode(),
+            isDark: isDark,
+          ),
+        ],
+      ),
     );
   }
 
-  Widget _buildWaveform(PlayerService playerService, SongModel song) {
+  Widget _buildWaveform(BuildContext context, PlayerService playerService, SongModel song) {
+
     return StreamBuilder<bool>(
       stream: playerService.playingStream,
       builder: (context, snapshot) {
         final isPlaying = snapshot.data ?? false;
 
-        return Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 32),
+        return SizedBox(
+          height: 40,
+          width: 200,
           child: WaveformPainter(
+            color: song.artColor.withValues(alpha: isPlaying ? 0.8 : 0.3),
             isPlaying: isPlaying,
-            color: song.artColor,
-            height: 50,
           ),
         );
       },
@@ -416,12 +431,16 @@ class _PlayerScreenState extends State<PlayerScreen>
   }
 }
 
-/// Shuffle button with active state glow
 class _ShuffleButton extends StatelessWidget {
-  final bool isActive;
+  final bool isShuffleModeEnabled;
   final VoidCallback onPressed;
+  final bool isDark;
 
-  const _ShuffleButton({required this.isActive, required this.onPressed});
+  const _ShuffleButton({
+    required this.isShuffleModeEnabled,
+    required this.onPressed,
+    required this.isDark,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -433,27 +452,15 @@ class _ShuffleButton extends StatelessWidget {
         height: 42,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
-          color: isActive
+          color: isShuffleModeEnabled
               ? AppColors.neonBlue.withValues(alpha: 0.15)
-              : Colors.white.withValues(alpha: 0.08),
-          border: Border.all(
-            color: isActive
-                ? AppColors.neonBlue.withValues(alpha: 0.5)
-                : Colors.white.withValues(alpha: 0.15),
-            width: 1,
-          ),
-          boxShadow: isActive
-              ? [
-                  BoxShadow(
-                    color: AppColors.neonBlue.withValues(alpha: 0.3),
-                    blurRadius: 12,
-                  ),
-                ]
-              : null,
+              : Colors.transparent,
         ),
         child: Icon(
           Icons.shuffle_rounded,
-          color: isActive ? AppColors.neonBlue : AppColors.textPrimary,
+          color: isShuffleModeEnabled 
+              ? AppColors.neonBlue 
+              : Theme.of(context).textTheme.bodySmall?.color,
           size: 20,
         ),
       ),
@@ -461,12 +468,16 @@ class _ShuffleButton extends StatelessWidget {
   }
 }
 
-/// Repeat button with cycling state (off → all → one)
 class _RepeatButton extends StatelessWidget {
   final LoopMode loopMode;
   final VoidCallback onPressed;
+  final bool isDark;
 
-  const _RepeatButton({required this.loopMode, required this.onPressed});
+  const _RepeatButton({
+    required this.loopMode,
+    required this.onPressed,
+    required this.isDark,
+  });
 
   bool get isActive => loopMode != LoopMode.off;
 
@@ -492,25 +503,13 @@ class _RepeatButton extends StatelessWidget {
           shape: BoxShape.circle,
           color: isActive
               ? AppColors.neonPurple.withValues(alpha: 0.15)
-              : Colors.white.withValues(alpha: 0.08),
-          border: Border.all(
-            color: isActive
-                ? AppColors.neonPurple.withValues(alpha: 0.5)
-                : Colors.white.withValues(alpha: 0.15),
-            width: 1,
-          ),
-          boxShadow: isActive
-              ? [
-                  BoxShadow(
-                    color: AppColors.neonPurple.withValues(alpha: 0.3),
-                    blurRadius: 12,
-                  ),
-                ]
-              : null,
+              : Colors.transparent,
         ),
         child: Icon(
           icon,
-          color: isActive ? AppColors.neonPurple : AppColors.textPrimary,
+          color: isActive 
+              ? AppColors.neonPurple 
+              : Theme.of(context).textTheme.bodySmall?.color,
           size: 20,
         ),
       ),

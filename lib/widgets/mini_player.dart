@@ -2,7 +2,6 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../services/player_service.dart';
-import '../theme/app_theme.dart';
 
 class MiniPlayer extends StatefulWidget {
   final VoidCallback onTap;
@@ -24,7 +23,7 @@ class _MiniPlayerState extends State<MiniPlayer>
   void initState() {
     super.initState();
     _slideController = AnimationController(
-      duration: const Duration(milliseconds: 500),
+      duration: const Duration(milliseconds: 600),
       vsync: this,
     );
     _slideController.forward();
@@ -40,6 +39,7 @@ class _MiniPlayerState extends State<MiniPlayer>
   Widget build(BuildContext context) {
     final playerService = context.watch<PlayerService>();
     final currentSong = playerService.currentSong;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
 
     if (currentSong == null) return const SizedBox.shrink();
 
@@ -60,44 +60,39 @@ class _MiniPlayerState extends State<MiniPlayer>
           }
         },
         child: Container(
-          margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+          margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
           child: ClipRRect(
-            borderRadius: BorderRadius.circular(20),
+            borderRadius: BorderRadius.circular(24),
             child: BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: 30, sigmaY: 30),
+              filter: ImageFilter.blur(sigmaX: 40, sigmaY: 40),
               child: Container(
                 height: 72,
                 decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(20),
-                  gradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [
-                      currentSong.artColor.withValues(alpha: 0.2),
-                      Colors.white.withValues(alpha: 0.08),
-                    ],
-                  ),
+                  borderRadius: BorderRadius.circular(24),
+                  // Extremely clean glass background
+                  color: isDark
+                      ? Colors.black.withValues(alpha: 0.4)
+                      : Colors.white.withValues(alpha: 0.7),
                   border: Border.all(
-                    color: AppColors.glassBorder,
+                    color: isDark 
+                        ? Colors.white.withValues(alpha: 0.1)
+                        : Colors.white.withValues(alpha: 0.6),
                     width: 1,
                   ),
                   boxShadow: [
                     BoxShadow(
-                      color: currentSong.artColor.withValues(alpha: 0.15),
+                      color: isDark 
+                          ? Colors.black.withValues(alpha: 0.4)
+                          : Colors.black.withValues(alpha: 0.05),
                       blurRadius: 20,
-                      offset: const Offset(0, -4),
-                    ),
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.3),
-                      blurRadius: 16,
-                      offset: const Offset(0, 4),
+                      offset: const Offset(0, 8),
                     ),
                   ],
                 ),
                 child: Column(
                   children: [
                     // Progress bar at top
-                    _MiniProgressBar(playerService: playerService),
+                    _MiniProgressBar(playerService: playerService, isDark: isDark),
                     // Content
                     Expanded(
                       child: Padding(
@@ -105,34 +100,31 @@ class _MiniPlayerState extends State<MiniPlayer>
                         child: Row(
                           children: [
                             // Album art
-                            Hero(
-                              tag: 'album_art_${currentSong.id}',
-                              child: Container(
-                                width: 44,
-                                height: 44,
-                                decoration: BoxDecoration(
-                                  borderRadius: BorderRadius.circular(12),
-                                  gradient: LinearGradient(
-                                    begin: Alignment.topLeft,
-                                    end: Alignment.bottomRight,
-                                    colors: [
-                                      currentSong.artColor,
-                                      currentSong.artColorSecondary,
-                                    ],
-                                  ),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: currentSong.artColor
-                                          .withValues(alpha: 0.4),
-                                      blurRadius: 8,
-                                    ),
+                            Container(
+                              width: 48,
+                              height: 48,
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(14),
+                                gradient: LinearGradient(
+                                  begin: Alignment.topLeft,
+                                  end: Alignment.bottomRight,
+                                  colors: [
+                                    currentSong.artColor,
+                                    currentSong.artColorSecondary,
                                   ],
                                 ),
-                                child: const Icon(
-                                  Icons.music_note_rounded,
-                                  color: Colors.white70,
-                                  size: 20,
-                                ),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: currentSong.artColor.withValues(alpha: 0.3),
+                                    blurRadius: 8,
+                                    offset: const Offset(0, 2),
+                                  ),
+                                ],
+                              ),
+                              child: const Icon(
+                                Icons.music_note_rounded,
+                                color: Colors.white70,
+                                size: 24,
                               ),
                             ),
                             const SizedBox(width: 12),
@@ -147,15 +139,22 @@ class _MiniPlayerState extends State<MiniPlayer>
                                     style: Theme.of(context)
                                         .textTheme
                                         .titleMedium
-                                        ?.copyWith(fontSize: 14),
+                                        ?.copyWith(
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w600,
+                                        ),
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
                                   ),
                                   const SizedBox(height: 2),
                                   Text(
                                     currentSong.artist,
-                                    style:
-                                        Theme.of(context).textTheme.bodySmall,
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .bodySmall
+                                        ?.copyWith(
+                                          fontSize: 12,
+                                        ),
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
                                   ),
@@ -163,29 +162,58 @@ class _MiniPlayerState extends State<MiniPlayer>
                               ),
                             ),
                             // Controls
-                            StreamBuilder<bool>(
-                              stream: playerService.playingStream,
-                              builder: (context, snapshot) {
-                                final isPlaying = snapshot.data ?? false;
-                                return Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    _MiniControlButton(
-                                      icon: isPlaying
-                                          ? Icons.pause_rounded
-                                          : Icons.play_arrow_rounded,
-                                      onTap: () =>
-                                          playerService.togglePlayPause(),
-                                      size: 40,
+                            Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                // Previous
+                                GestureDetector(
+                                  onTap: playerService.hasPrevious ? playerService.previous : null,
+                                  child: Container(
+                                    padding: const EdgeInsets.all(8),
+                                    child: Icon(
+                                      Icons.skip_previous_rounded,
+                                      color: playerService.hasPrevious
+                                          ? Theme.of(context).textTheme.bodyMedium?.color
+                                          : Theme.of(context).textTheme.bodySmall?.color?.withValues(alpha: 0.5),
+                                      size: 26,
                                     ),
-                                    _MiniControlButton(
-                                      icon: Icons.skip_next_rounded,
-                                      onTap: () => playerService.next(),
-                                      size: 36,
+                                  ),
+                                ),
+                                // Play/Pause
+                                StreamBuilder<bool>(
+                                  stream: playerService.playingStream,
+                                  builder: (context, snapshot) {
+                                    final isPlaying = snapshot.data ?? false;
+                                    return GestureDetector(
+                                      onTap: playerService.togglePlayPause,
+                                      child: Container(
+                                        padding: const EdgeInsets.all(8),
+                                        child: Icon(
+                                          isPlaying
+                                              ? Icons.pause_rounded
+                                              : Icons.play_arrow_rounded,
+                                          color: Theme.of(context).textTheme.bodyLarge?.color,
+                                          size: 32,
+                                        ),
+                                      ),
+                                    );
+                                  },
+                                ),
+                                // Next
+                                GestureDetector(
+                                  onTap: playerService.hasNext ? playerService.next : null,
+                                  child: Container(
+                                    padding: const EdgeInsets.all(8),
+                                    child: Icon(
+                                      Icons.skip_next_rounded,
+                                      color: playerService.hasNext
+                                          ? Theme.of(context).textTheme.bodyMedium?.color
+                                          : Theme.of(context).textTheme.bodySmall?.color?.withValues(alpha: 0.5),
+                                      size: 26,
                                     ),
-                                  ],
-                                );
-                              },
+                                  ),
+                                ),
+                              ],
                             ),
                           ],
                         ),
@@ -204,85 +232,57 @@ class _MiniPlayerState extends State<MiniPlayer>
 
 class _MiniProgressBar extends StatelessWidget {
   final PlayerService playerService;
+  final bool isDark;
 
-  const _MiniProgressBar({required this.playerService});
-
-  @override
-  Widget build(BuildContext context) {
-    return StreamBuilder<PositionData>(
-      stream: playerService.positionDataStream,
-      builder: (context, snapshot) {
-        final data = snapshot.data;
-        final progress = data != null && data.duration.inMilliseconds > 0
-            ? data.position.inMilliseconds / data.duration.inMilliseconds
-            : 0.0;
-
-        final song = playerService.currentSong;
-        final color = song?.artColor ?? AppColors.neonBlue;
-
-        return Container(
-          height: 3,
-          width: double.infinity,
-          decoration: BoxDecoration(
-            borderRadius: const BorderRadius.vertical(
-              top: Radius.circular(20),
-            ),
-          ),
-          child: FractionallySizedBox(
-            alignment: Alignment.centerLeft,
-            widthFactor: progress.clamp(0.0, 1.0),
-            child: Container(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [color, color.withValues(alpha: 0.7)],
-                ),
-                borderRadius: const BorderRadius.vertical(
-                  top: Radius.circular(20),
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: color.withValues(alpha: 0.5),
-                    blurRadius: 4,
-                  ),
-                ],
-              ),
-            ),
-          ),
-        );
-      },
-    );
-  }
-}
-
-class _MiniControlButton extends StatelessWidget {
-  final IconData icon;
-  final VoidCallback onTap;
-  final double size;
-
-  const _MiniControlButton({
-    required this.icon,
-    required this.onTap,
-    this.size = 40,
+  const _MiniProgressBar({
+    required this.playerService,
+    required this.isDark,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(20),
-        child: Container(
-          width: size,
-          height: size,
-          alignment: Alignment.center,
-          child: Icon(
-            icon,
-            color: AppColors.textPrimary,
-            size: size * 0.6,
+    final song = playerService.currentSong;
+    if (song == null) return const SizedBox.shrink();
+
+    return StreamBuilder<PositionData>(
+      stream: playerService.positionDataStream,
+      builder: (context, snapshot) {
+        final data = snapshot.data ??
+            PositionData(Duration.zero, Duration.zero, Duration.zero);
+
+        double progress = 0.0;
+        if (data.duration.inMilliseconds > 0) {
+          progress = data.position.inMilliseconds / data.duration.inMilliseconds;
+        }
+
+        return Container(
+          height: 2,
+          width: double.infinity,
+          color: isDark ? Colors.white.withValues(alpha: 0.1) : Colors.black.withValues(alpha: 0.05),
+          alignment: Alignment.centerLeft,
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              return Container(
+                width: constraints.maxWidth * progress.clamp(0.0, 1.0),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [
+                      song.artColor,
+                      song.artColorSecondary,
+                    ],
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: song.artColor.withValues(alpha: 0.5),
+                      blurRadius: 4,
+                    ),
+                  ],
+                ),
+              );
+            },
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 }

@@ -1,6 +1,5 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
-import '../theme/app_theme.dart';
 
 class GlassCard extends StatefulWidget {
   final Widget child;
@@ -18,8 +17,8 @@ class GlassCard extends StatefulWidget {
   const GlassCard({
     super.key,
     required this.child,
-    this.blur = 20.0,
-    this.opacity = 0.05,
+    this.blur = 40.0, // Increased blur for Apple-style glass
+    this.opacity = 0.5, // Used as base opacity
     this.glowColor,
     this.borderRadius = 20.0,
     this.padding,
@@ -45,10 +44,10 @@ class _GlassCardState extends State<GlassCard>
   void initState() {
     super.initState();
     _controller = AnimationController(
-      duration: const Duration(milliseconds: 200),
+      duration: const Duration(milliseconds: 300),
       vsync: this,
     );
-    _scaleAnimation = Tween<double>(begin: 1.0, end: 1.03).animate(
+    _scaleAnimation = Tween<double>(begin: 1.0, end: 1.02).animate(
       CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic),
     );
     _elevationAnimation = Tween<double>(begin: 0.0, end: 12.0).animate(
@@ -85,6 +84,8 @@ class _GlassCardState extends State<GlassCard>
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     return _GlassAnimatedBuilder(
       animation: _controller,
       builder: (context, child) {
@@ -102,14 +103,15 @@ class _GlassCardState extends State<GlassCard>
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(widget.borderRadius),
                 boxShadow: [
-                  // Base shadow
+                  // Very subtle Apple-style drop shadow
                   BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.2 + (_isPressed ? 0.15 : 0.0)),
-                    blurRadius: 16 + _elevationAnimation.value,
-                    offset: Offset(0, 4 + _elevationAnimation.value / 2),
+                    color: isDark 
+                        ? Colors.black.withValues(alpha: 0.3 + (_isPressed ? 0.2 : 0.0))
+                        : Colors.black.withValues(alpha: 0.05 + (_isPressed ? 0.03 : 0.0)),
+                    blurRadius: 20 + _elevationAnimation.value,
+                    offset: Offset(0, 8 + _elevationAnimation.value / 2),
                     spreadRadius: _isPressed ? 2 : 0,
                   ),
-                  // Glow effect
                   if (widget.glowColor != null)
                     BoxShadow(
                       color: widget.glowColor!.withValues(
@@ -128,21 +130,18 @@ class _GlassCardState extends State<GlassCard>
                     sigmaY: widget.blur,
                   ),
                   child: Container(
-                    padding: widget.padding ??
-                        const EdgeInsets.all(16),
+                    padding: widget.padding ?? const EdgeInsets.all(16),
                     decoration: BoxDecoration(
-                      borderRadius:
-                          BorderRadius.circular(widget.borderRadius),
-                      gradient: LinearGradient(
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                        colors: [
-                          Colors.white.withValues(alpha: widget.opacity + 0.05),
-                          Colors.white.withValues(alpha: widget.opacity),
-                        ],
-                      ),
+                      borderRadius: BorderRadius.circular(widget.borderRadius),
+                      // Clean glass fill
+                      color: isDark 
+                          ? Colors.black.withValues(alpha: 0.2) // Dark mode frosted
+                          : Colors.white.withValues(alpha: widget.opacity + 0.15), // Light mode highly frosted white
+                      // Crisp glass edge
                       border: Border.all(
-                        color: AppColors.glassBorder,
+                        color: isDark 
+                            ? Colors.white.withValues(alpha: 0.1)
+                            : Colors.white.withValues(alpha: 0.5),
                         width: 1,
                       ),
                     ),
@@ -175,4 +174,3 @@ class _GlassAnimatedBuilder extends AnimatedWidget {
     return builder(context, child);
   }
 }
-

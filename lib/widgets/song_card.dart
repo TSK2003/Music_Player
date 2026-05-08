@@ -25,13 +25,15 @@ class SongCard extends StatelessWidget {
     final favoritesService = context.watch<FavoritesService>();
     final isFavorite = favoritesService.isFavorite(song.id);
 
+    // Cap stagger at 10 items so large lists don't lag
+    final clampedIndex = index.clamp(0, 10);
     return TweenAnimationBuilder<double>(
       tween: Tween(begin: 0.0, end: 1.0),
-      duration: Duration(milliseconds: 400 + (index * 80)),
+      duration: Duration(milliseconds: 300 + (clampedIndex * 50)),
       curve: Curves.easeOutCubic,
       builder: (context, value, child) {
         return Transform.translate(
-          offset: Offset(0, 30 * (1 - value)),
+          offset: Offset(0, 20 * (1 - value)),
           child: Opacity(
             opacity: value.clamp(0.0, 1.0),
             child: child,

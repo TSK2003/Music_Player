@@ -9,6 +9,7 @@ class SongModel {
   final Color artColor;
   final Color artColorSecondary;
   final bool isLocal;
+  final String? category;
 
   SongModel({
     required this.id,
@@ -19,13 +20,17 @@ class SongModel {
     required this.artColor,
     required this.artColorSecondary,
     this.isLocal = false,
+    this.category,
   });
 
-  /// Parse a Google Drive filename to extract title and artist.
-  /// Expected format: "Artist - Title.mp3" or just "Title.mp3"
+  /// Create from a Google Drive file.
+  /// Uses googleapis.com direct media URL which doesn't redirect
+  /// (unlike the uc?export=download URL which breaks audio players).
   factory SongModel.fromDriveFile({
     required String fileId,
     required String fileName,
+    String apiKey = '',
+    String? category,
   }) {
     final parsed = _parseFileName(fileName);
 
@@ -34,15 +39,22 @@ class SongModel {
     final hue1 = (hash.abs() % 360).toDouble();
     final hue2 = ((hash.abs() * 7 + 137) % 360).toDouble();
 
+    // Use the Drive API v3 direct media download URL
+    // This streams audio directly without redirects
+    final streamUrl = apiKey.isNotEmpty
+        ? 'https://www.googleapis.com/drive/v3/files/$fileId?alt=media&key=$apiKey'
+        : 'https://drive.google.com/uc?export=download&id=$fileId';
+
     return SongModel(
       id: fileId,
       title: parsed.title,
       artist: parsed.artist,
-      streamUrl: 'https://drive.google.com/uc?export=download&id=$fileId',
+      streamUrl: streamUrl,
       fileName: fileName,
       artColor: HSLColor.fromAHSL(1.0, hue1, 0.7, 0.4).toColor(),
       artColorSecondary: HSLColor.fromAHSL(1.0, hue2, 0.6, 0.3).toColor(),
       isLocal: false,
+      category: category,
     );
   }
 
@@ -65,23 +77,54 @@ class SongModel {
       artColor: HSLColor.fromAHSL(1.0, hue1, 0.7, 0.4).toColor(),
       artColorSecondary: HSLColor.fromAHSL(1.0, hue2, 0.6, 0.3).toColor(),
       isLocal: true,
+      category: 'Local',
     );
   }
 
-  /// Parse filename into title and artist
+  /// Smart filename parser:
+  /// 1. Strips common suffixes like _spotdown.org, _masstamilan, etc.
+  /// 2. Extracts artist from "Artist - Title" or movie from "(From MovieName)"
+  /// 3. Cleans up underscores used as quotes
   static _ParsedName _parseFileName(String fileName) {
-    final nameWithoutExt = fileName.replaceAll(RegExp(r'\.[^.]+$'), '');
-    String title;
-    String artist;
+    // Remove file extension
+    String name = fileName.replaceAll(RegExp(r'\.[^.]+$'), '');
 
-    if (nameWithoutExt.contains(' - ')) {
-      final parts = nameWithoutExt.split(' - ');
+    // Strip common download site suffixes
+    name = name.replaceAll(RegExp(r'[_\-\s]*(spotdown\.org|masstamilan|isaimini|starmusiq|tamilwire|saavn|pagalworld|downloadming)$', caseSensitive: false), '');
+
+    // Clean up multiple underscores/spaces
+    name = name.replaceAll(RegExp(r'_+'), ' ').trim();
+
+    String title;
+    String artist = 'Unknown Artist';
+
+    // Try "Artist - Title" format first
+    if (name.contains(' - ')) {
+      final parts = name.split(' - ');
       artist = parts[0].trim();
       title = parts.sublist(1).join(' - ').trim();
     } else {
-      title = nameWithoutExt.trim();
-      artist = 'Unknown Artist';
+      title = name.trim();
+
+      // Try to extract movie name from "(From MovieName)" or "(From _MovieName_)"
+      final movieMatch = RegExp(r'\(From\s+[_"]?([^)_"]+)[_"]?\)', caseSensitive: false).firstMatch(title);
+      if (movieMatch != null) {
+        artist = movieMatch.group(1)?.trim() ?? 'Unknown Artist';
+        // Clean up the title — remove the "(From ...)" part for a cleaner look
+        // but keep it if the title would be too short
+        final cleanTitle = title.replaceAll(movieMatch.group(0)!, '').trim();
+        if (cleanTitle.length >= 3) {
+          title = cleanTitle;
+        }
+      }
     }
+
+    // Final cleanup: remove trailing/leading special chars
+    title = title.replaceAll(RegExp(r'^[\s_\-]+|[\s_\-]+$'), '');
+    artist = artist.replaceAll(RegExp(r'^[\s_\-]+|[\s_\-]+$'), '');
+
+    if (title.isEmpty) title = fileName;
+    if (artist.isEmpty) artist = 'Unknown Artist';
 
     return _ParsedName(title: title, artist: artist);
   }

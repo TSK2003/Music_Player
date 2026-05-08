@@ -13,6 +13,7 @@ import '../widgets/mini_player.dart';
 import '../widgets/shimmer_loading.dart';
 import '../widgets/song_card.dart';
 import 'player_screen.dart';
+import 'profile_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -46,9 +47,13 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   }
 
   void _onScroll() {
-    setState(() {
-      _scrollOffset = _scrollController.offset;
-    });
+    // Only update if significantly changed to avoid excessive rebuilds
+    final newOffset = _scrollController.offset;
+    if ((newOffset - _scrollOffset).abs() > 20) {
+      setState(() {
+        _scrollOffset = newOffset;
+      });
+    }
   }
 
   Future<void> _loadSongs() async {
@@ -132,7 +137,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     return base
         .where((song) =>
             song.title.toLowerCase().contains(query) ||
-            song.artist.toLowerCase().contains(query))
+            song.artist.toLowerCase().contains(query) ||
+            (song.category?.toLowerCase() == query))
         .toList();
   }
 
@@ -180,7 +186,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     final filteredSongs = _filteredSongs;
 
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: AnimatedBackground(
         scrollOffset: _scrollOffset,
         accentColor: currentSong?.artColor,
@@ -205,6 +211,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   // Tab bar
                   SliverToBoxAdapter(
                     child: _buildTabBar(),
+                  ),
+                  // Categories
+                  SliverToBoxAdapter(
+                    child: _buildCategories(),
                   ),
                   // Songs count
                   if (!_isLoading)
@@ -345,6 +355,60 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               _AddMusicButton(
                 onAddFiles: _addLocalFiles,
                 onAddFolder: _addLocalFolder,
+              ),
+              const SizedBox(width: 10),
+              // Profile button
+              GestureDetector(
+                onTap: () {
+                  Navigator.of(context).push(
+                    PageRouteBuilder(
+                      transitionDuration: const Duration(milliseconds: 400),
+                      reverseTransitionDuration: const Duration(milliseconds: 300),
+                      pageBuilder: (context, animation, secondaryAnimation) {
+                        return const ProfileScreen();
+                      },
+                      transitionsBuilder: (context, animation, secondaryAnimation, child) {
+                        return FadeTransition(
+                          opacity: animation,
+                          child: SlideTransition(
+                            position: Tween<Offset>(
+                              begin: const Offset(1, 0),
+                              end: Offset.zero,
+                            ).animate(CurvedAnimation(
+                              parent: animation,
+                              curve: Curves.easeOutCubic,
+                            )),
+                            child: child,
+                          ),
+                        );
+                      },
+                    ),
+                  );
+                },
+                child: Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [
+                        AppColors.neonPurple.withValues(alpha: 0.3),
+                        AppColors.neonBlue.withValues(alpha: 0.3),
+                      ],
+                    ),
+                    border: Border.all(
+                      color: AppColors.neonPurple.withValues(alpha: 0.4),
+                      width: 1,
+                    ),
+                  ),
+                  child: Icon(
+                    Icons.person_rounded,
+                    color: Theme.of(context).textTheme.bodyMedium?.color,
+                    size: 20,
+                  ),
+                ),
               ),
             ],
           ),
@@ -493,6 +557,86 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             ),
           );
         }),
+      ),
+    );
+  }
+
+  Widget _buildCategories() {
+    final playerService = Provider.of<PlayerService>(context);
+    
+    // Extract unique categories from loaded songs
+    final uniqueCategories = playerService.songs
+        .map((s) => s.category)
+        .whereType<String>() // Filters out nulls
+        .where((c) => c != 'Demo Tracks' && c != 'Local') // Optional: ignore specific tags
+        .toSet()
+        .toList()
+      ..sort();
+
+    if (uniqueCategories.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    final categories = ['All', ...uniqueCategories];
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: SizedBox(
+        height: 36,
+        child: ListView.builder(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          scrollDirection: Axis.horizontal,
+          physics: const BouncingScrollPhysics(),
+          itemCount: categories.length,
+          itemBuilder: (context, index) {
+            final category = categories[index];
+            final isActive = category == 'All' ? _searchQuery.isEmpty : _searchQuery.toLowerCase() == category.toLowerCase();
+            return GestureDetector(
+              onTap: () {
+                setState(() {
+                  if (category == 'All') {
+                    _searchQuery = '';
+                    _searchController.clear();
+                  } else {
+                    _searchQuery = category;
+                    _searchController.text = category;
+                  }
+                });
+              },
+              child: Container(
+                margin: const EdgeInsets.only(right: 8),
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(20),
+                  color: isActive 
+                      ? AppColors.neonPurple.withValues(alpha: 0.2) 
+                      : (Theme.of(context).brightness == Brightness.dark 
+                          ? Colors.white.withValues(alpha: 0.05) 
+                          : Colors.black.withValues(alpha: 0.03)),
+                  border: Border.all(
+                    color: isActive 
+                        ? AppColors.neonPurple 
+                        : (Theme.of(context).brightness == Brightness.dark 
+                            ? AppColors.glassBorder 
+                            : AppColors.lightGlassBorder),
+                  ),
+                ),
+                child: Center(
+                  child: Text(
+                    category,
+                    style: TextStyle(
+                      color: isActive 
+                          ? AppColors.neonPurple 
+                          : Theme.of(context).textTheme.bodyMedium?.color,
+                      fontSize: 12,
+                      fontWeight: isActive ? FontWeight.w600 : FontWeight.w500,
+                    ),
+                  ),
+                ),
+              ),
+            );
+          },
+        ),
       ),
     );
   }

@@ -1,7 +1,8 @@
 import 'package:audio_service/audio_service.dart';
+import 'package:flutter/foundation.dart';
 import 'package:just_audio/just_audio.dart';
 
-class AudioPlayerHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
+class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
   final AudioPlayer _player = AudioPlayer();
 
   AudioPlayerHandler() {
@@ -12,8 +13,12 @@ class AudioPlayerHandler extends BaseAudioHandler with QueueHandler, SeekHandler
 
     // Handle processing state changes
     _player.processingStateStream.listen((state) {
+      debugPrint('[AudioHandler] State: $state');
       if (state == ProcessingState.completed) {
-        skipToNext();
+        // Notify listeners that song completed — PlayerService handles next
+        playbackState.add(playbackState.value.copyWith(
+          processingState: AudioProcessingState.completed,
+        ));
       }
     });
 
@@ -25,16 +30,9 @@ class AudioPlayerHandler extends BaseAudioHandler with QueueHandler, SeekHandler
       }
     });
 
-    // Handle current index changes in playlist
-    _player.currentIndexStream.listen((index) {
-      if (index != null && queue.value.isNotEmpty && index < queue.value.length) {
-        mediaItem.add(queue.value[index]);
-      }
-    });
-
-    // Listen to errors
+    // Listen to errors and log them
     _player.errorStream.listen((error) {
-      // ignore for now
+      debugPrint('[AudioHandler] Playback error: $error');
     });
   }
 
@@ -65,38 +63,27 @@ class AudioPlayerHandler extends BaseAudioHandler with QueueHandler, SeekHandler
       updatePosition: _player.position,
       bufferedPosition: _player.bufferedPosition,
       speed: _player.speed,
-      queueIndex: event.currentIndex,
+      queueIndex: 0,
     ));
   }
 
-  Future<void> loadPlaylist(List<MediaItem> items, {int initialIndex = 0}) async {
-    queue.add(items);
-    
-    final sources = items.map((item) {
-      final uri = item.id;
-      // Local files use file path directly, Drive files use HTTP URL
+  /// Load and play a single song (avoids ConcatenatingAudioSource bugs on Windows)
+  Future<void> loadSingle(MediaItem item) async {
+    mediaItem.add(item);
+    queue.add([item]);
+
+    final uri = item.id;
+    try {
       if (uri.startsWith('http://') || uri.startsWith('https://')) {
-        return AudioSource.uri(Uri.parse(uri));
+        debugPrint('[AudioHandler] Loading URL: $uri');
+        await _player.setUrl(uri);
       } else {
-        // Local file path — convert to file:// URI
-        return AudioSource.file(uri);
+        debugPrint('[AudioHandler] Loading file: $uri');
+        await _player.setFilePath(uri);
       }
-    }).toList();
-
-    // ignore: deprecated_member_use
-    final playlist = ConcatenatingAudioSource(
-      useLazyPreparation: true,
-      children: sources,
-    );
-
-    await _player.setAudioSource(
-      playlist,
-      initialIndex: initialIndex,
-      initialPosition: Duration.zero,
-    );
-
-    if (items.isNotEmpty && initialIndex < items.length) {
-      mediaItem.add(items[initialIndex]);
+    } catch (e) {
+      debugPrint('[AudioHandler] Failed to load: $e');
+      rethrow;
     }
   }
 
@@ -116,30 +103,13 @@ class AudioPlayerHandler extends BaseAudioHandler with QueueHandler, SeekHandler
   Future<void> seek(Duration position) => _player.seek(position);
 
   @override
-  Future<void> skipToQueueItem(int index) async {
-    if (index < 0 || index >= queue.value.length) return;
-    await _player.seek(Duration.zero, index: index);
-    mediaItem.add(queue.value[index]);
-    play();
-  }
-
-  @override
   Future<void> skipToNext() async {
-    final currentIndex = _player.currentIndex ?? 0;
-    final nextIndex = (currentIndex + 1) % queue.value.length;
-    await skipToQueueItem(nextIndex);
+    // Handled by PlayerService
   }
 
   @override
   Future<void> skipToPrevious() async {
-    final currentIndex = _player.currentIndex ?? 0;
-    // If more than 3 seconds into song, restart current song
-    if (_player.position.inSeconds > 3) {
-      await _player.seek(Duration.zero);
-      return;
-    }
-    final prevIndex = (currentIndex - 1 + queue.value.length) % queue.value.length;
-    await skipToQueueItem(prevIndex);
+    // Handled by PlayerService
   }
 
   @override
