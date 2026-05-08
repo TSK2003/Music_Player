@@ -10,11 +10,15 @@ import 'services/player_service.dart';
 import 'services/theme_service.dart';
 import 'screens/home_screen.dart';
 import 'theme/app_theme.dart';
+import 'services/drive_service.dart';
 
 late AudioPlayerHandler _audioHandler;
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  
+  // Load Drive Config from local storage
+  await DriveService.loadConfig();
 
   // Initialize media_kit for Windows/Linux audio support
   if (defaultTargetPlatform == TargetPlatform.windows ||

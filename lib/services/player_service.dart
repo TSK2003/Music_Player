@@ -132,9 +132,7 @@ class PlayerService extends ChangeNotifier {
       debugPrint('[PlayerService] Error: $_error');
       notifyListeners();
     }
-  }
-
-  /// Toggle play/pause
+  }  /// Toggle play/pause
   Future<void> togglePlayPause() async {
     if (audioHandler.player.playing) {
       await audioHandler.pause();
@@ -143,6 +141,10 @@ class PlayerService extends ChangeNotifier {
     }
   }
 
+  /// Pause playing
+  Future<void> pause() async {
+    await audioHandler.pause();
+  }
   /// Seek to position
   Future<void> seekTo(Duration position) async {
     await audioHandler.seek(position);

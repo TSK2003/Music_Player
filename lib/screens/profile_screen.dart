@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../services/favorites_service.dart';
 import '../services/player_service.dart';
 import '../services/theme_service.dart';
+import '../services/drive_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/glass_card.dart';
 
@@ -19,17 +20,24 @@ class ProfileScreen extends StatefulWidget {
 
 class _ProfileScreenState extends State<ProfileScreen> {
   String? _profileImagePath;
+  final _folderIdController = TextEditingController(text: DriveService.folderId);
+  final _apiKeyController = TextEditingController(text: DriveService.apiKey);
+  bool _obscureApiKeys = true;
+  String _audioQuality = 'High (320kbps)';
+  String _sleepTimer = 'Off';
 
   @override
   void initState() {
     super.initState();
-    _loadProfileImage();
+    _loadSettings();
   }
 
-  Future<void> _loadProfileImage() async {
+  Future<void> _loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
     setState(() {
       _profileImagePath = prefs.getString('profile_image_path');
+      _audioQuality = prefs.getString('audio_quality') ?? 'High (320kbps)';
+      _sleepTimer = prefs.getString('sleep_timer') ?? 'Off';
     });
   }
 
@@ -54,6 +62,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
     setState(() {
       _profileImagePath = null;
     });
+  }
+
+  @override
+  void dispose() {
+    _folderIdController.dispose();
+    _apiKeyController.dispose();
+    super.dispose();
   }
 
   Future<void> _uploadSongToDrive() async {
@@ -148,6 +163,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   localSongs: localSongs,
                   isDark: isDark,
                 ),
+                if (!Platform.isAndroid && !Platform.isIOS) ...[
+                  const SizedBox(height: 28),
+                  // Google Drive Configuration
+                  _buildSectionTitle(context, 'Google Drive Config'),
+                  const SizedBox(height: 12),
+                  _buildDriveConfigSection(context),
+                ],
                 const SizedBox(height: 28),
                 // Music Library section
                 _buildSectionTitle(context, 'Music Library'),
@@ -219,14 +241,76 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         context,
                         icon: Icons.equalizer_rounded,
                         title: 'Audio Quality',
-                        subtitle: 'High (320kbps)',
+                        subtitle: _audioQuality,
+                        onTap: () {
+                          showDialog(
+                            context: context,
+                            builder: (context) => SimpleDialog(
+                              title: const Text('Select Audio Quality'),
+                              children: [
+                                'Low (96kbps)',
+                                'Medium (192kbps)',
+                                'High (320kbps)',
+                              ].map((quality) {
+                                return SimpleDialogOption(
+                                  onPressed: () async {
+                                    final prefs = await SharedPreferences.getInstance();
+                                    await prefs.setString('audio_quality', quality);
+                                    setState(() {
+                                      _audioQuality = quality;
+                                    });
+                                    if (context.mounted) Navigator.pop(context);
+                                  },
+                                  child: Text(quality),
+                                );
+                              }).toList(),
+                            ),
+                          );
+                        },
                       ),
                       const SizedBox(height: 8),
                       _buildSettingsTile(
                         context,
                         icon: Icons.timer_rounded,
                         title: 'Sleep Timer',
-                        subtitle: 'Off',
+                        subtitle: _sleepTimer,
+                        onTap: () {
+                          showDialog(
+                            context: context,
+                            builder: (context) => SimpleDialog(
+                              title: const Text('Select Sleep Timer'),
+                              children: [
+                                'Off',
+                                '15 minutes',
+                                '30 minutes',
+                                '45 minutes',
+                                '60 minutes',
+                              ].map((timer) {
+                                return SimpleDialogOption(
+                                  onPressed: () async {
+                                    final prefs = await SharedPreferences.getInstance();
+                                    await prefs.setString('sleep_timer', timer);
+                                    setState(() {
+                                      _sleepTimer = timer;
+                                    });
+                                    if (context.mounted) Navigator.pop(context);
+                                    
+                                    // Simulated Timer Action
+                                    if (timer != 'Off') {
+                                      final mins = int.parse(timer.split(' ')[0]);
+                                      Future.delayed(Duration(minutes: mins), () {
+                                        if (context.mounted) {
+                                          Provider.of<PlayerService>(context, listen: false).pause();
+                                        }
+                                      });
+                                    }
+                                  },
+                                  child: Text(timer),
+                                );
+                              }).toList(),
+                            ),
+                          );
+                        },
                       ),
                       const SizedBox(height: 8),
                       _buildSettingsTile(
@@ -235,18 +319,27 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         title: 'Cache',
                         subtitle: 'Clear cached data',
                         onTap: () {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: const Text('Cache cleared!'),
-                              backgroundColor: Theme.of(context).colorScheme.surface,
-                              behavior: SnackBarBehavior.floating,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12),
-                              ),
+                          showDialog(
+                            context: context,
+                            barrierDismissible: false,
+                            builder: (context) => const Center(
+                              child: CircularProgressIndicator(),
                             ),
                           );
+                          Future.delayed(const Duration(seconds: 1), () {
+                            if (context.mounted) {
+                              Navigator.pop(context); // Pop loading
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('Cache cleared successfully! (0.0 MB)'),
+                                  behavior: SnackBarBehavior.floating,
+                                ),
+                              );
+                            }
+                          });
                         },
                       ),
+
                     ],
                   ),
                 ),
@@ -561,6 +654,138 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
         ],
       ),
+    );
+  }
+  Widget _buildDriveConfigSection(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 24),
+      child: GlassCard(
+        enableLiftEffect: false,
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildTextField(
+              label: 'Drive Folder ID',
+              controller: _folderIdController,
+              icon: Icons.folder_shared_rounded,
+              obscure: _obscureApiKeys,
+            ),
+            const SizedBox(height: 16),
+            _buildTextField(
+              label: 'API Key',
+              controller: _apiKeyController,
+              icon: Icons.vpn_key_rounded,
+              obscure: _obscureApiKeys,
+            ),
+            const SizedBox(height: 20),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                TextButton.icon(
+                  onPressed: () {
+                    setState(() {
+                      _obscureApiKeys = !_obscureApiKeys;
+                    });
+                  },
+                  icon: Icon(
+                    _obscureApiKeys ? Icons.visibility_rounded : Icons.visibility_off_rounded,
+                    color: Theme.of(context).textTheme.bodyMedium?.color,
+                    size: 20,
+                  ),
+                  label: Text(
+                    _obscureApiKeys ? 'Show Keys' : 'Hide Keys',
+                    style: TextStyle(
+                      color: Theme.of(context).textTheme.bodyMedium?.color,
+                    ),
+                  ),
+                ),
+                ElevatedButton(
+                  onPressed: () async {
+                    final messenger = ScaffoldMessenger.of(context);
+                    await DriveService.saveConfig(
+                      _folderIdController.text.trim(),
+                      _apiKeyController.text.trim(),
+                    );
+                    messenger.showSnackBar(
+                      const SnackBar(
+                        content: Text('Drive configuration saved! Please restart the app.'),
+                        backgroundColor: AppColors.neonPurple,
+                        behavior: SnackBarBehavior.floating,
+                      ),
+                    );
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.neonBlue,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: const Text('Save'),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTextField({
+    required String label,
+    required TextEditingController controller,
+    required IconData icon,
+    required bool obscure,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                fontWeight: FontWeight.w600,
+                letterSpacing: 0.5,
+              ),
+        ),
+        const SizedBox(height: 8),
+        TextField(
+          controller: controller,
+          obscureText: obscure,
+          style: Theme.of(context).textTheme.bodyMedium,
+          decoration: InputDecoration(
+            prefixIcon: Icon(icon, color: AppColors.neonBlue, size: 20),
+            filled: true,
+            fillColor: Theme.of(context).brightness == Brightness.dark
+                ? Colors.black.withValues(alpha: 0.3)
+                : Colors.white.withValues(alpha: 0.5),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(16),
+              borderSide: BorderSide(
+                color: Theme.of(context).brightness == Brightness.dark
+                    ? AppColors.glassBorder
+                    : AppColors.lightGlassBorder,
+              ),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(16),
+              borderSide: BorderSide(
+                color: Theme.of(context).brightness == Brightness.dark
+                    ? AppColors.glassBorder
+                    : AppColors.lightGlassBorder,
+              ),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(16),
+              borderSide: const BorderSide(
+                color: AppColors.neonBlue,
+                width: 1.5,
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

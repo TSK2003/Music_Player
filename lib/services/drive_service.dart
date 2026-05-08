@@ -1,11 +1,26 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models/song_model.dart';
 
 class DriveService {
-  static const String _folderId = '1m2lIXYpdum1uqlaj-syVIBOOUK6WzYAO';
-  static const String _apiKey = 'AIzaSyBMFMvwOJDcoKH-7OIJDOqiiD1S0Us6zgM';
+  static String folderId = '1m2lIXYpdum1uqlaj-syVIBOOUK6WzYAO';
+  static String apiKey = 'AIzaSyBMFMvwOJDcoKH-7OIJDOqiiD1S0Us6zgM';
+
+  static Future<void> loadConfig() async {
+    final prefs = await SharedPreferences.getInstance();
+    folderId = prefs.getString('drive_folder_id') ?? '1m2lIXYpdum1uqlaj-syVIBOOUK6WzYAO';
+    apiKey = prefs.getString('drive_api_key') ?? 'AIzaSyBMFMvwOJDcoKH-7OIJDOqiiD1S0Us6zgM';
+  }
+
+  static Future<void> saveConfig(String newFolderId, String newApiKey) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('drive_folder_id', newFolderId);
+    await prefs.setString('drive_api_key', newApiKey);
+    folderId = newFolderId;
+    apiKey = newApiKey;
+  }
 
   /// Fetches ALL songs from a public Google Drive folder, including subfolders.
   /// Subfolder names will be used as the song's "category".
@@ -14,15 +29,15 @@ class DriveService {
       final allSongs = <SongModel>[];
       
       // 1. Fetch audio files directly in the root folder (uncategorized)
-      final rootSongs = await _fetchAudioInFolder(_folderId, null);
+      final rootSongs = await _fetchAudioInFolder(folderId, null);
       allSongs.addAll(rootSongs);
 
       // 2. Fetch subfolders in the root folder
       final url = Uri.parse(
         'https://www.googleapis.com/drive/v3/files'
-        '?q=%27$_folderId%27+in+parents+and+mimeType=%27application/vnd.google-apps.folder%27'
+        '?q=%27$folderId%27+in+parents+and+mimeType=%27application/vnd.google-apps.folder%27'
         '&fields=files(id,name)'
-        '&key=$_apiKey'
+        '&key=$apiKey'
         '&orderBy=name'
       );
       final response = await http.get(url);
@@ -58,7 +73,7 @@ class DriveService {
           'https://www.googleapis.com/drive/v3/files'
           '?q=%27$folderId%27+in+parents+and+mimeType+contains+%27audio%27'
           '&fields=nextPageToken,files(id,name)'
-          '&key=$_apiKey'
+          '&key=$apiKey'
           '&pageSize=1000'
           '&orderBy=name'
           '${nextPageToken != null ? '&pageToken=$nextPageToken' : ''}',
@@ -84,7 +99,7 @@ class DriveService {
               .map((file) => SongModel.fromDriveFile(
                     fileId: file['id'] as String,
                     fileName: file['name'] as String,
-                    apiKey: _apiKey,
+                    apiKey: apiKey,
                     category: category,
                   ))
               .toList();

@@ -25,22 +25,7 @@ class SongCard extends StatelessWidget {
     final favoritesService = context.watch<FavoritesService>();
     final isFavorite = favoritesService.isFavorite(song.id);
 
-    // Cap stagger at 10 items so large lists don't lag
-    final clampedIndex = index.clamp(0, 10);
-    return TweenAnimationBuilder<double>(
-      tween: Tween(begin: 0.0, end: 1.0),
-      duration: Duration(milliseconds: 300 + (clampedIndex * 50)),
-      curve: Curves.easeOutCubic,
-      builder: (context, value, child) {
-        return Transform.translate(
-          offset: Offset(0, 20 * (1 - value)),
-          child: Opacity(
-            opacity: value.clamp(0.0, 1.0),
-            child: child,
-          ),
-        );
-      },
-      child: GlassCard(
+    return GlassCard(
         onTap: onTap,
         glowColor: isPlaying ? AppColors.neonBlue : null,
         margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
@@ -116,7 +101,9 @@ class SongCard extends StatelessWidget {
                     style: Theme.of(context).textTheme.titleMedium?.copyWith(
                           color: isPlaying
                               ? AppColors.neonBlue
-                              : AppColors.textPrimary,
+                              : (Theme.of(context).brightness == Brightness.dark
+                                  ? AppColors.textPrimary
+                                  : AppColors.lightTextPrimary),
                           fontWeight:
                               isPlaying ? FontWeight.w600 : FontWeight.w500,
                         ),
@@ -129,7 +116,9 @@ class SongCard extends StatelessWidget {
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                           color: isPlaying
                               ? AppColors.neonBlue.withValues(alpha: 0.7)
-                              : AppColors.textSecondary,
+                              : (Theme.of(context).brightness == Brightness.dark
+                                  ? AppColors.textSecondary
+                                  : AppColors.lightTextSecondary),
                         ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
@@ -154,7 +143,6 @@ class SongCard extends StatelessWidget {
               ),
           ],
         ),
-      ),
     );
   }
 }

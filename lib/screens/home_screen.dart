@@ -305,11 +305,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 height: 42,
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(12),
-                  gradient: const LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [AppColors.neonPurple, AppColors.neonBlue],
-                  ),
                   boxShadow: [
                     BoxShadow(
                       color: AppColors.neonPurple.withValues(alpha: 0.3),
@@ -317,10 +312,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                     ),
                   ],
                 ),
-                child: const Icon(
-                  Icons.headphones_rounded,
-                  color: Colors.white,
-                  size: 22,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: Image.asset(
+                    'assets/ic_launcher.png',
+                    fit: BoxFit.cover,
+                  ),
                 ),
               ),
               const SizedBox(width: 14),
@@ -433,9 +430,13 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               height: 52,
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(18),
-                color: Colors.white.withValues(alpha: 0.06),
+                color: Theme.of(context).brightness == Brightness.dark
+                    ? Colors.white.withValues(alpha: 0.06)
+                    : Colors.white.withValues(alpha: 0.6),
                 border: Border.all(
-                  color: AppColors.glassBorder,
+                  color: Theme.of(context).brightness == Brightness.dark
+                      ? AppColors.glassBorder
+                      : AppColors.lightGlassBorder,
                   width: 1,
                 ),
               ),
@@ -447,16 +448,22 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   });
                 },
                 style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                      color: AppColors.textPrimary,
+                      color: Theme.of(context).brightness == Brightness.dark
+                          ? AppColors.textPrimary
+                          : AppColors.lightTextPrimary,
                     ),
                 decoration: InputDecoration(
                   hintText: 'Search songs...',
                   hintStyle: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                        color: AppColors.textMuted,
+                        color: Theme.of(context).brightness == Brightness.dark
+                            ? AppColors.textMuted
+                            : AppColors.lightTextMuted,
                       ),
-                  prefixIcon: const Icon(
+                  prefixIcon: Icon(
                     Icons.search_rounded,
-                    color: AppColors.textMuted,
+                    color: Theme.of(context).brightness == Brightness.dark
+                        ? AppColors.textMuted
+                        : AppColors.lightTextSecondary,
                     size: 22,
                   ),
                   suffixIcon: _searchQuery.isNotEmpty
@@ -467,9 +474,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                               _searchQuery = '';
                             });
                           },
-                          child: const Icon(
+                          child: Icon(
                             Icons.close_rounded,
-                            color: AppColors.textMuted,
+                            color: Theme.of(context).brightness == Brightness.dark
+                                ? AppColors.textMuted
+                                : AppColors.lightTextSecondary,
                             size: 20,
                           ),
                         )
@@ -512,11 +521,15 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   borderRadius: BorderRadius.circular(14),
                   color: isActive
                       ? AppColors.neonBlue.withValues(alpha: 0.15)
-                      : Colors.white.withValues(alpha: 0.04),
+                      : (Theme.of(context).brightness == Brightness.dark
+                          ? Colors.white.withValues(alpha: 0.04)
+                          : Colors.black.withValues(alpha: 0.03)),
                   border: Border.all(
                     color: isActive
                         ? AppColors.neonBlue.withValues(alpha: 0.4)
-                        : AppColors.glassBorder,
+                        : (Theme.of(context).brightness == Brightness.dark
+                            ? AppColors.glassBorder
+                            : AppColors.lightGlassBorder),
                     width: 1,
                   ),
                   boxShadow: isActive
@@ -536,7 +549,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                       size: 16,
                       color: isActive
                           ? AppColors.neonBlue
-                          : AppColors.textMuted,
+                          : (Theme.of(context).brightness == Brightness.dark
+                              ? AppColors.textMuted
+                              : AppColors.lightTextSecondary),
                     ),
                     const SizedBox(width: 6),
                     Text(
@@ -544,7 +559,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
                             color: isActive
                                 ? AppColors.neonBlue
-                                : AppColors.textMuted,
+                                : (Theme.of(context).brightness == Brightness.dark
+                                    ? AppColors.textMuted
+                                    : AppColors.lightTextSecondary),
                             fontWeight: isActive
                                 ? FontWeight.w600
                                 : FontWeight.w400,
@@ -664,7 +681,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 ? '$count Songs'
                 : '$count Results',
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: AppColors.textMuted,
+                  color: Theme.of(context).brightness == Brightness.dark
+                      ? AppColors.textMuted
+                      : AppColors.lightTextSecondary,
                   letterSpacing: 0.5,
                 ),
           ),

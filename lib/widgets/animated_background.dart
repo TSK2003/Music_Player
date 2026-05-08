@@ -104,10 +104,10 @@ class _LiquidPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    // Opacity based on theme (Light mode needs slightly lighter blobs to not overpower)
-    final alpha1 = isDark ? 0.7 : 0.4;
-    final alpha2 = isDark ? 0.6 : 0.3;
-    final alpha3 = isDark ? 0.5 : 0.25;
+    // Opacity based on theme (Light mode needs extremely subtle blobs to look perfectly white)
+    final alpha1 = isDark ? 0.7 : 0.08;
+    final alpha2 = isDark ? 0.6 : 0.05;
+    final alpha3 = isDark ? 0.5 : 0.03;
 
     final paint1 = Paint()
       ..color = color1.withValues(alpha: alpha1)
