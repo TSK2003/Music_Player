@@ -85,7 +85,7 @@ class _GlassCardState extends State<GlassCard>
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedBuilder(
+    return _GlassAnimatedBuilder(
       animation: _controller,
       builder: (context, child) {
         return Transform.scale(
@@ -159,35 +159,12 @@ class _GlassCardState extends State<GlassCard>
   }
 }
 
-/// Helper: AnimatedBuilder that works like AnimatedWidget but with builder pattern
-class AnimatedBuilder extends StatelessWidget {
-  final Animation<double> animation;
+/// AnimatedWidget-based builder used internally by GlassCard
+class _GlassAnimatedBuilder extends AnimatedWidget {
   final Widget Function(BuildContext context, Widget? child) builder;
   final Widget? child;
 
-  const AnimatedBuilder({
-    super.key,
-    required this.animation,
-    required this.builder,
-    this.child,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedBuilder2(
-      animation: animation,
-      builder: builder,
-      child: child,
-    );
-  }
-}
-
-class AnimatedBuilder2 extends AnimatedWidget {
-  final Widget Function(BuildContext context, Widget? child) builder;
-  final Widget? child;
-
-  const AnimatedBuilder2({
-    super.key,
+  const _GlassAnimatedBuilder({
     required Animation<double> animation,
     required this.builder,
     this.child,
@@ -198,3 +175,4 @@ class AnimatedBuilder2 extends AnimatedWidget {
     return builder(context, child);
   }
 }
+

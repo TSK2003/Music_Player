@@ -60,7 +60,7 @@ class _GlowButtonState extends State<GlowButton>
 
     return GestureDetector(
       onTap: widget.onPressed,
-      child: AnimatedBuilder(
+      child: NeonAnimatedBuilder(
         animation: _glowController,
         builder: (context, child) {
           final glowIntensity = widget.enableGlow
@@ -178,12 +178,12 @@ class _ControlButtonState extends State<ControlButton>
   }
 }
 
-/// AnimatedBuilder using AnimatedWidget pattern
-class AnimatedBuilder extends AnimatedWidget {
+/// NeonAnimatedBuilder using AnimatedWidget pattern
+class NeonAnimatedBuilder extends AnimatedWidget {
   final Widget Function(BuildContext context, Widget? child) builder;
   final Widget? child;
 
-  const AnimatedBuilder({
+  const NeonAnimatedBuilder({
     super.key,
     required Animation<double> animation,
     required this.builder,

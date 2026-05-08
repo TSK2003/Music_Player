@@ -72,12 +72,25 @@ class AudioPlayerHandler extends BaseAudioHandler with QueueHandler, SeekHandler
   Future<void> loadPlaylist(List<MediaItem> items, {int initialIndex = 0}) async {
     queue.add(items);
     
-    final sources = items
-        .map((item) => AudioSource.uri(Uri.parse(item.id)))
-        .toList();
+    final sources = items.map((item) {
+      final uri = item.id;
+      // Local files use file path directly, Drive files use HTTP URL
+      if (uri.startsWith('http://') || uri.startsWith('https://')) {
+        return AudioSource.uri(Uri.parse(uri));
+      } else {
+        // Local file path — convert to file:// URI
+        return AudioSource.file(uri);
+      }
+    }).toList();
 
-    await _player.setAudioSources(
-      sources,
+    // ignore: deprecated_member_use
+    final playlist = ConcatenatingAudioSource(
+      useLazyPreparation: true,
+      children: sources,
+    );
+
+    await _player.setAudioSource(
+      playlist,
       initialIndex: initialIndex,
       initialPosition: Duration.zero,
     );

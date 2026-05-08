@@ -14,7 +14,7 @@ class DriveService {
         'https://www.googleapis.com/drive/v3/files'
         '?q=%27$_folderId%27+in+parents+and+mimeType+contains+%27audio%27'
         '&fields=files(id,name,mimeType,size)'
-        '&key=AIzaSyAa8yy0GdcGPHdtD083HiGGx_S0vMPScDM'
+        '&key=AIzaSyBMFMvwOJDcoKH-7OIJDOqiiD1S0Us6zgM'
         '&pageSize=100'
         '&orderBy=name',
       );

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:just_audio/just_audio.dart';
 import 'package:provider/provider.dart';
 import '../models/song_model.dart';
+import '../services/favorites_service.dart';
 import '../services/player_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/glow_button.dart';
@@ -63,7 +65,7 @@ class _PlayerScreenState extends State<PlayerScreen>
             child: Column(
               children: [
                 // Top bar
-                _buildTopBar(context),
+                _buildTopBar(context, currentSong),
                 const Spacer(flex: 1),
                 // Album art
                 _buildAlbumArt(currentSong),
@@ -88,7 +90,10 @@ class _PlayerScreenState extends State<PlayerScreen>
     );
   }
 
-  Widget _buildTopBar(BuildContext context) {
+  Widget _buildTopBar(BuildContext context, SongModel song) {
+    final favoritesService = context.watch<FavoritesService>();
+    final isFavorite = favoritesService.isFavorite(song.id);
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: Row(
@@ -129,22 +134,31 @@ class _PlayerScreenState extends State<PlayerScreen>
               ),
             ],
           ),
-          // More button
-          Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: Colors.white.withValues(alpha: 0.08),
-              border: Border.all(
-                color: AppColors.glassBorder,
-                width: 1,
+          // Favorite button
+          GestureDetector(
+            onTap: () => favoritesService.toggleFavorite(song.id),
+            child: Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: Colors.white.withValues(alpha: 0.08),
+                border: Border.all(
+                  color: isFavorite
+                      ? AppColors.accentPink.withValues(alpha: 0.4)
+                      : AppColors.glassBorder,
+                  width: 1,
+                ),
               ),
-            ),
-            child: const Icon(
-              Icons.more_vert_rounded,
-              color: AppColors.textPrimary,
-              size: 20,
+              child: Icon(
+                isFavorite
+                    ? Icons.favorite_rounded
+                    : Icons.favorite_border_rounded,
+                color: isFavorite
+                    ? AppColors.accentPink
+                    : AppColors.textPrimary,
+                size: 20,
+              ),
             ),
           ),
         ],
@@ -233,6 +247,46 @@ class _PlayerScreenState extends State<PlayerScreen>
                         ),
                       ),
                     ),
+                    // Local file badge
+                    if (song.isLocal)
+                      Positioned(
+                        bottom: 12,
+                        right: 12,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: AppColors.accentCyan.withValues(alpha: 0.2),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: AppColors.accentCyan.withValues(alpha: 0.4),
+                              width: 1,
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(
+                                Icons.folder_rounded,
+                                color: AppColors.accentCyan,
+                                size: 12,
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                'LOCAL',
+                                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                      color: AppColors.accentCyan,
+                                      fontSize: 9,
+                                      fontWeight: FontWeight.w700,
+                                      letterSpacing: 1,
+                                    ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
                   ],
                 ),
               ),
@@ -295,15 +349,16 @@ class _PlayerScreenState extends State<PlayerScreen>
       stream: playerService.playingStream,
       builder: (context, snapshot) {
         final isPlaying = snapshot.data ?? false;
+        final shuffleOn = playerService.shuffleEnabled;
+        final loopMode = playerService.loopMode;
 
         return Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            // Shuffle (decorative for now)
-            ControlButton(
-              icon: Icons.shuffle_rounded,
-              size: 42,
-              onPressed: () {},
+            // Shuffle — now functional
+            _ShuffleButton(
+              isActive: shuffleOn,
+              onPressed: () => playerService.toggleShuffle(),
             ),
             const SizedBox(width: 20),
             // Previous
@@ -331,11 +386,10 @@ class _PlayerScreenState extends State<PlayerScreen>
               onPressed: () => playerService.next(),
             ),
             const SizedBox(width: 20),
-            // Repeat (decorative for now)
-            ControlButton(
-              icon: Icons.repeat_rounded,
-              size: 42,
-              onPressed: () {},
+            // Repeat — now functional
+            _RepeatButton(
+              loopMode: loopMode,
+              onPressed: () => playerService.cycleLoopMode(),
             ),
           ],
         );
@@ -358,6 +412,108 @@ class _PlayerScreenState extends State<PlayerScreen>
           ),
         );
       },
+    );
+  }
+}
+
+/// Shuffle button with active state glow
+class _ShuffleButton extends StatelessWidget {
+  final bool isActive;
+  final VoidCallback onPressed;
+
+  const _ShuffleButton({required this.isActive, required this.onPressed});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onPressed,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        width: 42,
+        height: 42,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: isActive
+              ? AppColors.neonBlue.withValues(alpha: 0.15)
+              : Colors.white.withValues(alpha: 0.08),
+          border: Border.all(
+            color: isActive
+                ? AppColors.neonBlue.withValues(alpha: 0.5)
+                : Colors.white.withValues(alpha: 0.15),
+            width: 1,
+          ),
+          boxShadow: isActive
+              ? [
+                  BoxShadow(
+                    color: AppColors.neonBlue.withValues(alpha: 0.3),
+                    blurRadius: 12,
+                  ),
+                ]
+              : null,
+        ),
+        child: Icon(
+          Icons.shuffle_rounded,
+          color: isActive ? AppColors.neonBlue : AppColors.textPrimary,
+          size: 20,
+        ),
+      ),
+    );
+  }
+}
+
+/// Repeat button with cycling state (off → all → one)
+class _RepeatButton extends StatelessWidget {
+  final LoopMode loopMode;
+  final VoidCallback onPressed;
+
+  const _RepeatButton({required this.loopMode, required this.onPressed});
+
+  bool get isActive => loopMode != LoopMode.off;
+
+  IconData get icon {
+    switch (loopMode) {
+      case LoopMode.one:
+        return Icons.repeat_one_rounded;
+      case LoopMode.all:
+      case LoopMode.off:
+        return Icons.repeat_rounded;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onPressed,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        width: 42,
+        height: 42,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: isActive
+              ? AppColors.neonPurple.withValues(alpha: 0.15)
+              : Colors.white.withValues(alpha: 0.08),
+          border: Border.all(
+            color: isActive
+                ? AppColors.neonPurple.withValues(alpha: 0.5)
+                : Colors.white.withValues(alpha: 0.15),
+            width: 1,
+          ),
+          boxShadow: isActive
+              ? [
+                  BoxShadow(
+                    color: AppColors.neonPurple.withValues(alpha: 0.3),
+                    blurRadius: 12,
+                  ),
+                ]
+              : null,
+        ),
+        child: Icon(
+          icon,
+          color: isActive ? AppColors.neonPurple : AppColors.textPrimary,
+          size: 20,
+        ),
+      ),
     );
   }
 }

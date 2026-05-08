@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../models/song_model.dart';
+import '../services/favorites_service.dart';
 import '../theme/app_theme.dart';
 import 'glass_card.dart';
+import 'glow_button.dart' show NeonAnimatedBuilder;
 
 class SongCard extends StatelessWidget {
   final SongModel song;
@@ -19,6 +22,9 @@ class SongCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final favoritesService = context.watch<FavoritesService>();
+    final isFavorite = favoritesService.isFavorite(song.id);
+
     return TweenAnimationBuilder<double>(
       tween: Tween(begin: 0.0, end: 1.0),
       duration: Duration(milliseconds: 400 + (index * 80)),
@@ -62,12 +68,38 @@ class SongCard extends StatelessWidget {
                           ),
                         ],
                 ),
-                child: Center(
-                  child: Icon(
-                    isPlaying ? Icons.equalizer_rounded : Icons.music_note_rounded,
-                    color: Colors.white.withValues(alpha: 0.9),
-                    size: 24,
-                  ),
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    Icon(
+                      isPlaying ? Icons.equalizer_rounded : Icons.music_note_rounded,
+                      color: Colors.white.withValues(alpha: 0.9),
+                      size: 24,
+                    ),
+                    // Local file indicator
+                    if (song.isLocal)
+                      Positioned(
+                        bottom: 4,
+                        right: 4,
+                        child: Container(
+                          width: 14,
+                          height: 14,
+                          decoration: BoxDecoration(
+                            color: AppColors.accentCyan.withValues(alpha: 0.9),
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: Colors.black.withValues(alpha: 0.3),
+                              width: 1,
+                            ),
+                          ),
+                          child: const Icon(
+                            Icons.folder_rounded,
+                            color: Colors.white,
+                            size: 8,
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
               ),
             ),
@@ -103,6 +135,12 @@ class SongCard extends StatelessWidget {
                 ],
               ),
             ),
+            // Favorite button
+            _FavoriteButton(
+              isFavorite: isFavorite,
+              onTap: () => favoritesService.toggleFavorite(song.id),
+            ),
+            const SizedBox(width: 8),
             // Playing indicator or play icon
             if (isPlaying)
               _PlayingIndicator()
@@ -113,6 +151,68 @@ class SongCard extends StatelessWidget {
                 size: 28,
               ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Animated heart button for favorites
+class _FavoriteButton extends StatefulWidget {
+  final bool isFavorite;
+  final VoidCallback onTap;
+
+  const _FavoriteButton({required this.isFavorite, required this.onTap});
+
+  @override
+  State<_FavoriteButton> createState() => _FavoriteButtonState();
+}
+
+class _FavoriteButtonState extends State<_FavoriteButton>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      duration: const Duration(milliseconds: 300),
+      vsync: this,
+    );
+  }
+
+  @override
+  void didUpdateWidget(_FavoriteButton oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.isFavorite && !oldWidget.isFavorite) {
+      _controller.forward(from: 0.0);
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: widget.onTap,
+      behavior: HitTestBehavior.opaque,
+      child: ScaleTransition(
+        scale: Tween<double>(begin: 1.0, end: 1.3).animate(
+          CurvedAnimation(
+            parent: _controller,
+            curve: Curves.elasticOut,
+          ),
+        ),
+        child: Icon(
+          widget.isFavorite ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+          color: widget.isFavorite
+              ? AppColors.accentPink
+              : AppColors.textMuted.withValues(alpha: 0.6),
+          size: 22,
         ),
       ),
     );
@@ -152,7 +252,7 @@ class _PlayingIndicatorState extends State<_PlayingIndicator>
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: List.generate(3, (index) {
-        return AnimatedBuilder2(
+        return NeonAnimatedBuilder(
           animation: _controllers[index],
           builder: (context, child) {
             return Container(

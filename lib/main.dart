@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:just_audio_media_kit/just_audio_media_kit.dart';
 import 'package:provider/provider.dart';
 import 'services/audio_handler.dart';
+import 'services/favorites_service.dart';
 import 'services/player_service.dart';
 import 'screens/home_screen.dart';
 import 'theme/app_theme.dart';
@@ -48,20 +49,31 @@ Future<void> main() async {
     ),
   );
 
-  runApp(const MusicPlayerApp());
+  // Pre-load favorites
+  final favoritesService = FavoritesService();
+  await favoritesService.load();
+
+  runApp(MusicPlayerApp(favoritesService: favoritesService));
 }
 
 class MusicPlayerApp extends StatelessWidget {
-  const MusicPlayerApp({super.key});
+  final FavoritesService favoritesService;
+
+  const MusicPlayerApp({super.key, required this.favoritesService});
 
   @override
   Widget build(BuildContext context) {
-    return ChangeNotifierProvider(
-      create: (_) {
-        final service = PlayerService(_audioHandler);
-        service.startListening();
-        return service;
-      },
+    return MultiProvider(
+      providers: [
+        ChangeNotifierProvider(
+          create: (_) {
+            final service = PlayerService(_audioHandler);
+            service.startListening();
+            return service;
+          },
+        ),
+        ChangeNotifierProvider.value(value: favoritesService),
+      ],
       child: MaterialApp(
         title: 'Music Player',
         debugShowCheckedModeBanner: false,

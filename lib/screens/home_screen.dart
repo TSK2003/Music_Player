@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/song_model.dart';
 import '../services/drive_service.dart';
+import '../services/favorites_service.dart';
+import '../services/local_file_service.dart';
 import '../services/player_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/animated_background.dart' show AnimatedBackground;
@@ -27,6 +29,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   String _searchQuery = '';
   String? _error;
   late AnimationController _titleController;
+
+  // Tab state: 0 = All, 1 = Favorites, 2 = Local
+  int _activeTab = 0;
 
   @override
   void initState() {
@@ -53,11 +58,17 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     });
 
     try {
-      final songs = await DriveService.fetchSongs();
+      // Load from both Drive and local files in parallel
+      final results = await Future.wait([
+        DriveService.fetchSongs(),
+        LocalFileService.loadSavedFiles(),
+      ]);
+
       if (mounted) {
         final playerService =
             Provider.of<PlayerService>(context, listen: false);
-        playerService.setSongs(songs);
+        final allSongs = [...results[0], ...results[1]];
+        playerService.setSongs(allSongs);
         setState(() {
           _isLoading = false;
         });
@@ -72,11 +83,53 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     }
   }
 
+  /// Pick local files and add them
+  Future<void> _addLocalFiles() async {
+    final songs = await LocalFileService.pickFiles();
+    if (songs.isNotEmpty && mounted) {
+      final playerService =
+          Provider.of<PlayerService>(context, listen: false);
+      playerService.addSongs(songs);
+      setState(() {
+        _activeTab = 0; // Switch to "All" to show the new songs
+      });
+    }
+  }
+
+  /// Pick a folder of audio files
+  Future<void> _addLocalFolder() async {
+    final songs = await LocalFileService.pickFolder();
+    if (songs.isNotEmpty && mounted) {
+      final playerService =
+          Provider.of<PlayerService>(context, listen: false);
+      playerService.addSongs(songs);
+      setState(() {
+        _activeTab = 0;
+      });
+    }
+  }
+
   List<SongModel> get _filteredSongs {
     final playerService = Provider.of<PlayerService>(context, listen: false);
-    if (_searchQuery.isEmpty) return playerService.songs;
+    final favoritesService = Provider.of<FavoritesService>(context, listen: false);
+    
+    List<SongModel> base;
+    switch (_activeTab) {
+      case 1: // Favorites
+        base = playerService.songs
+            .where((s) => favoritesService.isFavorite(s.id))
+            .toList();
+        break;
+      case 2: // Local
+        base = playerService.songs.where((s) => s.isLocal).toList();
+        break;
+      default: // All
+        base = playerService.songs;
+    }
+
+    if (_searchQuery.isEmpty) return base;
     final query = _searchQuery.toLowerCase();
-    return playerService.songs
+    return base
         .where((song) =>
             song.title.toLowerCase().contains(query) ||
             song.artist.toLowerCase().contains(query))
@@ -122,6 +175,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   Widget build(BuildContext context) {
     final playerService = context.watch<PlayerService>();
     final currentSong = playerService.currentSong;
+    // Watch favorites to rebuild when they change
+    context.watch<FavoritesService>();
     final filteredSongs = _filteredSongs;
 
     return Scaffold(
@@ -146,6 +201,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   // Search bar
                   SliverToBoxAdapter(
                     child: _buildSearchBar(),
+                  ),
+                  // Tab bar
+                  SliverToBoxAdapter(
+                    child: _buildTabBar(),
                   ),
                   // Songs count
                   if (!_isLoading)
@@ -281,6 +340,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   ),
                 ],
               ),
+              const Spacer(),
+              // Add music button
+              _AddMusicButton(
+                onAddFiles: _addLocalFiles,
+                onAddFolder: _addLocalFolder,
+              ),
             ],
           ),
         ),
@@ -355,6 +420,79 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildTabBar() {
+    final tabs = [
+      _TabItem(label: 'All', icon: Icons.library_music_rounded),
+      _TabItem(label: 'Favorites', icon: Icons.favorite_rounded),
+      _TabItem(label: 'Local', icon: Icons.folder_rounded),
+    ];
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 4, 20, 4),
+      child: Row(
+        children: List.generate(tabs.length, (index) {
+          final isActive = _activeTab == index;
+          return Expanded(
+            child: GestureDetector(
+              onTap: () => setState(() => _activeTab = index),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 250),
+                curve: Curves.easeOutCubic,
+                margin: const EdgeInsets.symmetric(horizontal: 4),
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(14),
+                  color: isActive
+                      ? AppColors.neonBlue.withValues(alpha: 0.15)
+                      : Colors.white.withValues(alpha: 0.04),
+                  border: Border.all(
+                    color: isActive
+                        ? AppColors.neonBlue.withValues(alpha: 0.4)
+                        : AppColors.glassBorder,
+                    width: 1,
+                  ),
+                  boxShadow: isActive
+                      ? [
+                          BoxShadow(
+                            color: AppColors.neonBlue.withValues(alpha: 0.15),
+                            blurRadius: 12,
+                          ),
+                        ]
+                      : null,
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      tabs[index].icon,
+                      size: 16,
+                      color: isActive
+                          ? AppColors.neonBlue
+                          : AppColors.textMuted,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      tabs[index].label,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: isActive
+                                ? AppColors.neonBlue
+                                : AppColors.textMuted,
+                            fontWeight: isActive
+                                ? FontWeight.w600
+                                : FontWeight.w400,
+                            fontSize: 12,
+                          ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        }),
       ),
     );
   }
@@ -439,6 +577,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   }
 
   Widget _buildEmpty() {
+    final isLocalTab = _activeTab == 2;
+    final isFavTab = _activeTab == 1;
+
     return Padding(
       padding: const EdgeInsets.all(32),
       child: GlassCard(
@@ -448,26 +589,160 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             Icon(
               _searchQuery.isNotEmpty
                   ? Icons.search_off_rounded
-                  : Icons.music_off_rounded,
-              color: AppColors.textMuted,
+                  : isFavTab
+                      ? Icons.favorite_border_rounded
+                      : isLocalTab
+                          ? Icons.folder_open_rounded
+                          : Icons.music_off_rounded,
+              color: _searchQuery.isNotEmpty
+                  ? AppColors.textMuted
+                  : isFavTab
+                      ? AppColors.accentPink
+                      : isLocalTab
+                          ? AppColors.accentCyan
+                          : AppColors.textMuted,
               size: 48,
             ),
             const SizedBox(height: 16),
             Text(
               _searchQuery.isNotEmpty
                   ? 'No songs found'
-                  : 'No songs available',
+                  : isFavTab
+                      ? 'No favorites yet'
+                      : isLocalTab
+                          ? 'No local files'
+                          : 'No songs available',
               style: Theme.of(context).textTheme.titleLarge,
             ),
             const SizedBox(height: 8),
             Text(
               _searchQuery.isNotEmpty
                   ? 'Try a different search term'
-                  : 'Add some music to your Drive folder',
+                  : isFavTab
+                      ? 'Tap ♥ on songs to add them here'
+                      : isLocalTab
+                          ? 'Tap + to browse your music files'
+                          : 'Add some music to your Drive folder',
               style: Theme.of(context).textTheme.bodyMedium,
               textAlign: TextAlign.center,
             ),
+            if (isLocalTab && _searchQuery.isEmpty) ...[
+              const SizedBox(height: 20),
+              GestureDetector(
+                onTap: _addLocalFiles,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 24,
+                    vertical: 12,
+                  ),
+                  decoration: BoxDecoration(
+                    gradient: AppColors.neonGradient,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.add_rounded, color: Colors.white, size: 18),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Browse Files',
+                        style: Theme.of(context).textTheme.labelLarge,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _TabItem {
+  final String label;
+  final IconData icon;
+  const _TabItem({required this.label, required this.icon});
+}
+
+/// Floating action button for adding local music
+class _AddMusicButton extends StatelessWidget {
+  final VoidCallback onAddFiles;
+  final VoidCallback onAddFolder;
+
+  const _AddMusicButton({
+    required this.onAddFiles,
+    required this.onAddFolder,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return PopupMenuButton<String>(
+      onSelected: (value) {
+        if (value == 'files') {
+          onAddFiles();
+        } else if (value == 'folder') {
+          onAddFolder();
+        }
+      },
+      offset: const Offset(0, 48),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+      ),
+      color: AppColors.surface.withValues(alpha: 0.95),
+      elevation: 12,
+      shadowColor: AppColors.neonBlue.withValues(alpha: 0.2),
+      itemBuilder: (context) => [
+        PopupMenuItem(
+          value: 'files',
+          child: Row(
+            children: [
+              Icon(Icons.audio_file_rounded, color: AppColors.neonBlue, size: 20),
+              const SizedBox(width: 12),
+              Text('Add Music Files',
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: AppColors.textPrimary,
+                      )),
+            ],
+          ),
+        ),
+        PopupMenuItem(
+          value: 'folder',
+          child: Row(
+            children: [
+              Icon(Icons.folder_rounded, color: AppColors.accentCyan, size: 20),
+              const SizedBox(width: 12),
+              Text('Add Music Folder',
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: AppColors.textPrimary,
+                      )),
+            ],
+          ),
+        ),
+      ],
+      child: Container(
+        width: 40,
+        height: 40,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              AppColors.neonBlue.withValues(alpha: 0.2),
+              AppColors.neonPurple.withValues(alpha: 0.2),
+            ],
+          ),
+          border: Border.all(
+            color: AppColors.neonBlue.withValues(alpha: 0.3),
+            width: 1,
+          ),
+        ),
+        child: const Icon(
+          Icons.add_rounded,
+          color: AppColors.neonBlue,
+          size: 22,
         ),
       ),
     );
