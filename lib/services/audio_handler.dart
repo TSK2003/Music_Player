@@ -75,7 +75,7 @@ class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
     final uri = item.id;
     try {
       if (uri.startsWith('http://') || uri.startsWith('https://')) {
-        debugPrint('[AudioHandler] Loading URL: $uri');
+        debugPrint('[AudioHandler] Loading URL: ${uri.substring(0, uri.length.clamp(0, 100))}...');
         await _player.setUrl(uri);
       } else {
         debugPrint('[AudioHandler] Loading file: $uri');

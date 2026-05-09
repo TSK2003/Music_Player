@@ -5,13 +5,13 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/song_model.dart';
 
 class DriveService {
-  static String folderId = '1m2lIXYpdum1uqlaj-syVIBOOUK6WzYAO';
-  static String apiKey = 'AIzaSyBMFMvwOJDcoKH-7OIJDOqiiD1S0Us6zgM';
+  static String folderId = '';
+  static String apiKey = '';
 
   static Future<void> loadConfig() async {
     final prefs = await SharedPreferences.getInstance();
-    folderId = prefs.getString('drive_folder_id') ?? '1m2lIXYpdum1uqlaj-syVIBOOUK6WzYAO';
-    apiKey = prefs.getString('drive_api_key') ?? 'AIzaSyBMFMvwOJDcoKH-7OIJDOqiiD1S0Us6zgM';
+    folderId = prefs.getString('drive_folder_id') ?? '';
+    apiKey = prefs.getString('drive_api_key') ?? '';
   }
 
   static Future<void> saveConfig(String newFolderId, String newApiKey) async {
@@ -115,6 +115,37 @@ class DriveService {
     }
 
     return folderSongs;
+  }
+
+  /// Fetches existing subfolders inside the configured root folder.
+  static Future<List<Map<String, String>>> fetchSubfolders() async {
+    final subfolders = <Map<String, String>>[];
+    if (folderId.isEmpty || apiKey.isEmpty) return subfolders;
+
+    try {
+      final url = Uri.parse(
+        'https://www.googleapis.com/drive/v3/files'
+        '?q=%27$folderId%27+in+parents+and+mimeType=%27application/vnd.google-apps.folder%27'
+        '&fields=files(id,name)'
+        '&key=$apiKey'
+        '&orderBy=name'
+      );
+      final response = await http.get(url);
+      
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        final files = data['files'] as List<dynamic>? ?? [];
+        for (final file in files) {
+          subfolders.add({
+            'id': file['id'] as String? ?? '',
+            'name': file['name'] as String? ?? '',
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint('[DriveService] Error fetching subfolders: $e');
+    }
+    return subfolders;
   }
 
   /// Demo songs as absolute last fallback using valid direct public URLs

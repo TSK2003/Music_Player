@@ -6,6 +6,7 @@ import '../services/drive_service.dart';
 import '../services/favorites_service.dart';
 import '../services/local_file_service.dart';
 import '../services/player_service.dart';
+import '../services/youtube_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/animated_background.dart' show AnimatedBackground;
 import '../widgets/glass_card.dart';
@@ -14,6 +15,7 @@ import '../widgets/shimmer_loading.dart';
 import '../widgets/song_card.dart';
 import 'player_screen.dart';
 import 'profile_screen.dart';
+import 'youtube_search_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -31,8 +33,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   String? _error;
   late AnimationController _titleController;
 
-  // Tab state: 0 = All, 1 = Favorites, 2 = Local
+  // Tab state: 0 = All, 1 = Favorites, 2 = YouTube, 3 = Local
   int _activeTab = 0;
+
+  // Selection mode
+  bool _selectionMode = false;
+  final Set<String> _selectedIds = {};
 
   @override
   void initState() {
@@ -114,6 +120,115 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     }
   }
 
+  void _toggleSelection(String songId) {
+    setState(() {
+      if (_selectedIds.contains(songId)) {
+        _selectedIds.remove(songId);
+        if (_selectedIds.isEmpty) _selectionMode = false;
+      } else {
+        _selectedIds.add(songId);
+      }
+    });
+  }
+
+  void _selectAll(List<SongModel> songs) {
+    setState(() {
+      if (_selectedIds.length == songs.length) {
+        _selectedIds.clear();
+        _selectionMode = false;
+      } else {
+        _selectedIds.clear();
+        _selectedIds.addAll(songs.map((s) => s.id));
+      }
+    });
+  }
+
+  void _playSelected(List<SongModel> allSongs) {
+    final selected = allSongs.where((s) => _selectedIds.contains(s.id)).toList();
+    if (selected.isEmpty) return;
+    final playerService = Provider.of<PlayerService>(context, listen: false);
+    playerService.playSong(selected.first, playlist: selected);
+    setState(() {
+      _selectionMode = false;
+      _selectedIds.clear();
+    });
+  }
+
+  Future<void> _downloadSelected(List<SongModel> allSongs) async {
+    final selected = allSongs.where((s) => _selectedIds.contains(s.id) && s.isYouTube).toList();
+    if (selected.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('No YouTube songs selected to download'),
+          backgroundColor: AppColors.accentPink.withValues(alpha: 0.9),
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        ),
+      );
+      return;
+    }
+
+    setState(() {
+      _selectionMode = false;
+      _selectedIds.clear();
+    });
+
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text('Downloading ${selected.length} song(s)...'),
+        backgroundColor: const Color(0xFFFF4444).withValues(alpha: 0.9),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+
+    int success = 0;
+    int failed = 0;
+    for (final song in selected) {
+      try {
+        final videoId = song.id.replaceFirst('yt_', '');
+        final result = YouTubeResult(
+          videoId: videoId,
+          title: song.title,
+          author: song.artist,
+          duration: song.duration,
+          thumbnailUrl: song.thumbnailUrl ?? '',
+        );
+        await YouTubeService.downloadPermanently(result);
+        success++;
+      } catch (e) {
+        failed++;
+        debugPrint('[HomeScreen] Download failed for ${song.title}: $e');
+      }
+    }
+
+    if (mounted) {
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            failed == 0
+                ? 'Downloaded $success song(s) ✓'
+                : 'Downloaded $success, failed $failed',
+          ),
+          backgroundColor: failed == 0
+              ? Colors.green.withValues(alpha: 0.9)
+              : AppColors.accentPink.withValues(alpha: 0.9),
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        ),
+      );
+    }
+  }
+
+  void _exitSelectionMode() {
+    setState(() {
+      _selectionMode = false;
+      _selectedIds.clear();
+    });
+  }
+
   List<SongModel> get _filteredSongs {
     final playerService = Provider.of<PlayerService>(context, listen: false);
     final favoritesService = Provider.of<FavoritesService>(context, listen: false);
@@ -125,7 +240,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             .where((s) => favoritesService.isFavorite(s.id))
             .toList();
         break;
-      case 2: // Local
+      case 2: // YouTube
+        base = playerService.songs.where((s) => s.isYouTube).toList();
+        break;
+      case 3: // Local
         base = playerService.songs.where((s) => s.isLocal).toList();
         break;
       default: // All
@@ -138,7 +256,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         .where((song) =>
             song.title.toLowerCase().contains(query) ||
             song.artist.toLowerCase().contains(query) ||
-            (song.category?.toLowerCase() == query))
+            (song.category?.toLowerCase().contains(query) ?? false))
         .toList();
   }
 
@@ -209,13 +327,20 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                     child: _buildSearchBar(),
                   ),
                   // Tab bar
-                  SliverToBoxAdapter(
-                    child: _buildTabBar(),
-                  ),
+                  if (!_selectionMode)
+                    SliverToBoxAdapter(
+                      child: _buildTabBar(),
+                    ),
+                  // Selection toolbar
+                  if (_selectionMode)
+                    SliverToBoxAdapter(
+                      child: _buildSelectionToolbar(filteredSongs),
+                    ),
                   // Categories
-                  SliverToBoxAdapter(
-                    child: _buildCategories(),
-                  ),
+                  if (!_selectionMode)
+                    SliverToBoxAdapter(
+                      child: _buildCategories(),
+                    ),
                   // Songs count
                   if (!_isLoading)
                     SliverToBoxAdapter(
@@ -240,16 +365,27 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                         (context, index) {
                           final song = filteredSongs[index];
                           final isPlaying = currentSong?.id == song.id;
+                          final isSelected = _selectedIds.contains(song.id);
 
                           return SongCard(
                             song: song,
                             isPlaying: isPlaying,
+                            isSelected: isSelected,
+                            selectionMode: _selectionMode,
                             index: index,
-                            onTap: () {
-                              playerService.playSong(
-                                song,
-                                playlist: filteredSongs,
-                              );
+                            onTap: _selectionMode
+                                ? () => _toggleSelection(song.id)
+                                : () {
+                                    playerService.playSong(
+                                      song,
+                                      playlist: filteredSongs,
+                                    );
+                                  },
+                            onLongPress: () {
+                              if (!_selectionMode) {
+                                setState(() => _selectionMode = true);
+                              }
+                              _toggleSelection(song.id);
                             },
                           );
                         },
@@ -348,6 +484,60 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 ],
               ),
               const Spacer(),
+              // YouTube search button
+              GestureDetector(
+                onTap: () {
+                  Navigator.of(context).push(
+                    PageRouteBuilder(
+                      transitionDuration: const Duration(milliseconds: 400),
+                      reverseTransitionDuration: const Duration(milliseconds: 300),
+                      pageBuilder: (context, animation, secondaryAnimation) {
+                        return const YouTubeSearchScreen();
+                      },
+                      transitionsBuilder: (context, animation, secondaryAnimation, child) {
+                        return FadeTransition(
+                          opacity: animation,
+                          child: SlideTransition(
+                            position: Tween<Offset>(
+                              begin: const Offset(0, 0.1),
+                              end: Offset.zero,
+                            ).animate(CurvedAnimation(
+                              parent: animation,
+                              curve: Curves.easeOutCubic,
+                            )),
+                            child: child,
+                          ),
+                        );
+                      },
+                    ),
+                  );
+                },
+                child: Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [
+                        const Color(0xFFFF0000).withValues(alpha: 0.2),
+                        const Color(0xFFFF4444).withValues(alpha: 0.15),
+                      ],
+                    ),
+                    border: Border.all(
+                      color: const Color(0xFFFF0000).withValues(alpha: 0.3),
+                      width: 1,
+                    ),
+                  ),
+                  child: const Icon(
+                    Icons.play_circle_rounded,
+                    color: Color(0xFFFF4444),
+                    size: 22,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
               // Add music button
               _AddMusicButton(
                 onAddFiles: _addLocalFiles,
@@ -501,6 +691,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     final tabs = [
       _TabItem(label: 'All', icon: Icons.library_music_rounded),
       _TabItem(label: 'Favorites', icon: Icons.favorite_rounded),
+      _TabItem(label: 'YouTube', icon: Icons.play_circle_rounded),
       _TabItem(label: 'Local', icon: Icons.folder_rounded),
     ];
 
@@ -546,27 +737,31 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   children: [
                     Icon(
                       tabs[index].icon,
-                      size: 16,
+                      size: 14,
                       color: isActive
                           ? AppColors.neonBlue
                           : (Theme.of(context).brightness == Brightness.dark
                               ? AppColors.textMuted
                               : AppColors.lightTextSecondary),
                     ),
-                    const SizedBox(width: 6),
-                    Text(
-                      tabs[index].label,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: isActive
-                                ? AppColors.neonBlue
-                                : (Theme.of(context).brightness == Brightness.dark
-                                    ? AppColors.textMuted
-                                    : AppColors.lightTextSecondary),
-                            fontWeight: isActive
-                                ? FontWeight.w600
-                                : FontWeight.w400,
-                            fontSize: 12,
-                          ),
+                    const SizedBox(width: 4),
+                    Flexible(
+                      child: Text(
+                        tabs[index].label,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: isActive
+                                  ? AppColors.neonBlue
+                                  : (Theme.of(context).brightness == Brightness.dark
+                                      ? AppColors.textMuted
+                                      : AppColors.lightTextSecondary),
+                              fontWeight: isActive
+                                  ? FontWeight.w600
+                                  : FontWeight.w400,
+                              fontSize: 11,
+                            ),
+                        overflow: TextOverflow.ellipsis,
+                        maxLines: 1,
+                      ),
                     ),
                   ],
                 ),
@@ -687,6 +882,172 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   letterSpacing: 0.5,
                 ),
           ),
+          const Spacer(),
+          if (!_selectionMode && count > 0)
+            GestureDetector(
+              onTap: () {
+                setState(() => _selectionMode = true);
+              },
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).brightness == Brightness.dark
+                      ? Colors.white.withValues(alpha: 0.06)
+                      : Colors.black.withValues(alpha: 0.04),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: Theme.of(context).brightness == Brightness.dark
+                        ? AppColors.glassBorder
+                        : AppColors.lightGlassBorder,
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.checklist_rounded,
+                      size: 14,
+                      color: Theme.of(context).brightness == Brightness.dark
+                          ? AppColors.textMuted
+                          : AppColors.lightTextMuted,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      'Select',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            fontSize: 11,
+                            color: Theme.of(context).brightness == Brightness.dark
+                                ? AppColors.textMuted
+                                : AppColors.lightTextMuted,
+                          ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSelectionToolbar(List<SongModel> songs) {
+    final allSelected = _selectedIds.length == songs.length && songs.isNotEmpty;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(20, 4, 20, 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: isDark
+            ? AppColors.neonBlue.withValues(alpha: 0.1)
+            : AppColors.neonBlue.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: AppColors.neonBlue.withValues(alpha: 0.3),
+        ),
+      ),
+      child: Row(
+        children: [
+          // Select All / Deselect All
+          GestureDetector(
+            onTap: () => _selectAll(songs),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  allSelected ? Icons.deselect_rounded : Icons.select_all_rounded,
+                  size: 18,
+                  color: AppColors.neonBlue,
+                ),
+                const SizedBox(width: 4),
+                Text(
+                  allSelected ? 'Deselect' : 'Select All',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: AppColors.neonBlue,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 12,
+                      ),
+                ),
+              ],
+            ),
+          ),
+          const Spacer(),
+          // Count
+          Text(
+            '${_selectedIds.length} selected',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: isDark ? AppColors.textMuted : AppColors.lightTextMuted,
+                  fontSize: 11,
+                ),
+          ),
+          const SizedBox(width: 8),
+          // Download selected button
+          GestureDetector(
+            onTap: _selectedIds.isNotEmpty ? () => _downloadSelected(songs) : null,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: _selectedIds.isNotEmpty
+                    ? const Color(0xFFFF4444)
+                    : Colors.grey.withValues(alpha: 0.3),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.download_rounded, size: 14, color: Colors.white),
+                  const SizedBox(width: 4),
+                  Text(
+                    'Download',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 11,
+                        ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(width: 6),
+          // Play selected button
+          GestureDetector(
+            onTap: _selectedIds.isNotEmpty ? () => _playSelected(songs) : null,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: _selectedIds.isNotEmpty
+                    ? AppColors.neonBlue
+                    : Colors.grey.withValues(alpha: 0.3),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.play_arrow_rounded, size: 14, color: Colors.white),
+                  const SizedBox(width: 4),
+                  Text(
+                    'Play',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 11,
+                        ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          // Close selection
+          GestureDetector(
+            onTap: _exitSelectionMode,
+            child: Icon(
+              Icons.close_rounded,
+              size: 18,
+              color: isDark ? AppColors.textMuted : AppColors.lightTextMuted,
+            ),
+          ),
         ],
       ),
     );
@@ -740,8 +1101,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   }
 
   Widget _buildEmpty() {
-    final isLocalTab = _activeTab == 2;
+    final isLocalTab = _activeTab == 3;
     final isFavTab = _activeTab == 1;
+    final isYouTubeTab = _activeTab == 2;
 
     return Padding(
       padding: const EdgeInsets.all(32),
@@ -754,16 +1116,20 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   ? Icons.search_off_rounded
                   : isFavTab
                       ? Icons.favorite_border_rounded
-                      : isLocalTab
-                          ? Icons.folder_open_rounded
-                          : Icons.music_off_rounded,
+                      : isYouTubeTab
+                          ? Icons.play_circle_outline_rounded
+                          : isLocalTab
+                              ? Icons.folder_open_rounded
+                              : Icons.music_off_rounded,
               color: _searchQuery.isNotEmpty
                   ? AppColors.textMuted
                   : isFavTab
                       ? AppColors.accentPink
-                      : isLocalTab
-                          ? AppColors.accentCyan
-                          : AppColors.textMuted,
+                      : isYouTubeTab
+                          ? const Color(0xFFFF4444)
+                          : isLocalTab
+                              ? AppColors.accentCyan
+                              : AppColors.textMuted,
               size: 48,
             ),
             const SizedBox(height: 16),
@@ -772,9 +1138,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   ? 'No songs found'
                   : isFavTab
                       ? 'No favorites yet'
-                      : isLocalTab
-                          ? 'No local files'
-                          : 'No songs available',
+                      : isYouTubeTab
+                          ? 'No YouTube songs yet'
+                          : isLocalTab
+                              ? 'No local files'
+                              : 'No songs available',
               style: Theme.of(context).textTheme.titleLarge,
             ),
             const SizedBox(height: 8),
@@ -783,12 +1151,76 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   ? 'Try a different search term'
                   : isFavTab
                       ? 'Tap ♥ on songs to add them here'
-                      : isLocalTab
-                          ? 'Tap + to browse your music files'
-                          : 'Add some music to your Drive folder',
+                      : isYouTubeTab
+                          ? 'Search YouTube to play songs ad-free'
+                          : isLocalTab
+                              ? 'Tap + to browse your music files'
+                              : 'Add some music to your Drive folder',
               style: Theme.of(context).textTheme.bodyMedium,
               textAlign: TextAlign.center,
             ),
+            if (isYouTubeTab && _searchQuery.isEmpty) ...[
+              const SizedBox(height: 20),
+              GestureDetector(
+                onTap: () {
+                  Navigator.of(context).push(
+                    PageRouteBuilder(
+                      transitionDuration: const Duration(milliseconds: 400),
+                      reverseTransitionDuration: const Duration(milliseconds: 300),
+                      pageBuilder: (context, animation, secondaryAnimation) {
+                        return const YouTubeSearchScreen();
+                      },
+                      transitionsBuilder: (context, animation, secondaryAnimation, child) {
+                        return FadeTransition(
+                          opacity: animation,
+                          child: SlideTransition(
+                            position: Tween<Offset>(
+                              begin: const Offset(0, 0.1),
+                              end: Offset.zero,
+                            ).animate(CurvedAnimation(
+                              parent: animation,
+                              curve: Curves.easeOutCubic,
+                            )),
+                            child: child,
+                          ),
+                        );
+                      },
+                    ),
+                  );
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 24,
+                    vertical: 12,
+                  ),
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(
+                      colors: [Color(0xFFFF4444), Color(0xFFFF0000)],
+                    ),
+                    borderRadius: BorderRadius.circular(12),
+                    boxShadow: [
+                      BoxShadow(
+                        color: const Color(0xFFFF0000).withValues(alpha: 0.3),
+                        blurRadius: 12,
+                      ),
+                    ],
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.search_rounded, color: Colors.white, size: 18),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Search YouTube',
+                        style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                              color: Colors.white,
+                            ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
             if (isLocalTab && _searchQuery.isEmpty) ...[
               const SizedBox(height: 20),
               GestureDetector(

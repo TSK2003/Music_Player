@@ -1,4 +1,5 @@
 import 'dart:ui';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../services/player_service.dart';
@@ -121,11 +122,31 @@ class _MiniPlayerState extends State<MiniPlayer>
                                   ),
                                 ],
                               ),
-                              child: const Icon(
-                                Icons.music_note_rounded,
-                                color: Colors.white70,
-                                size: 24,
-                              ),
+                              child: currentSong.thumbnailUrl != null
+                                  ? ClipRRect(
+                                      borderRadius: BorderRadius.circular(14),
+                                      child: CachedNetworkImage(
+                                        imageUrl: currentSong.thumbnailUrl!,
+                                        fit: BoxFit.cover,
+                                        width: 48,
+                                        height: 48,
+                                        placeholder: (context, url) => const Icon(
+                                          Icons.music_note_rounded,
+                                          color: Colors.white70,
+                                          size: 24,
+                                        ),
+                                        errorWidget: (context, url, error) => const Icon(
+                                          Icons.music_note_rounded,
+                                          color: Colors.white70,
+                                          size: 24,
+                                        ),
+                                      ),
+                                    )
+                                  : const Icon(
+                                      Icons.music_note_rounded,
+                                      color: Colors.white70,
+                                      size: 24,
+                                    ),
                             ),
                             const SizedBox(width: 12),
                             // Song info

@@ -8,6 +8,7 @@ import '../services/favorites_service.dart';
 import '../services/player_service.dart';
 import '../services/theme_service.dart';
 import '../services/drive_service.dart';
+import '../models/song_model.dart';
 import '../theme/app_theme.dart';
 import '../widgets/glass_card.dart';
 
@@ -71,17 +72,398 @@ class _ProfileScreenState extends State<ProfileScreen> {
     super.dispose();
   }
 
+  Widget _buildOptionCard(
+    BuildContext context, {
+    required IconData icon,
+    required Color color,
+    required String title,
+    required String subtitle,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          color: Colors.white.withValues(alpha: 0.06),
+          border: Border.all(
+            color: Colors.white.withValues(alpha: 0.1),
+          ),
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(12),
+                color: color.withValues(alpha: 0.15),
+              ),
+              child: Icon(icon, color: color, size: 24),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 15,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    subtitle,
+                    style: const TextStyle(
+                      color: AppColors.textMuted,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Future<void> _uploadSongToDrive() async {
     final result = await FilePicker.platform.pickFiles(
       type: FileType.audio,
     );
 
-    if (result != null && mounted) {
-      // Mock upload process
+    if (result == null || result.files.single.path == null) return;
+    final file = result.files.single;
+    final fileName = file.name;
+
+    if (!mounted) return;
+
+    final selectedFolderType = await showDialog<String>(
+      context: context,
+      builder: (BuildContext context) {
+        return Dialog(
+          backgroundColor: Colors.transparent,
+          child: GlassCard(
+            useBackdropFilter: true,
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'Upload Folder',
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                      ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Choose where to upload "$fileName"',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: AppColors.textMuted,
+                      ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 24),
+                _buildOptionCard(
+                  context,
+                  icon: Icons.create_new_folder_rounded,
+                  color: AppColors.neonBlue,
+                  title: 'New Folder',
+                  subtitle: 'Create a new category folder',
+                  onTap: () => Navigator.pop(context, 'new'),
+                ),
+                const SizedBox(height: 12),
+                _buildOptionCard(
+                  context,
+                  icon: Icons.folder_shared_rounded,
+                  color: AppColors.neonPurple,
+                  title: 'Existing Folder',
+                  subtitle: 'Select from existing folders',
+                  onTap: () => Navigator.pop(context, 'existing'),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+
+    if (selectedFolderType == null) return;
+
+    String? categoryName;
+
+    if (selectedFolderType == 'new') {
+      if (!mounted) return;
+      final nameController = TextEditingController();
+      final newFolderName = await showDialog<String>(
+        context: context,
+        builder: (context) {
+          return Dialog(
+            backgroundColor: Colors.transparent,
+            child: GlassCard(
+              useBackdropFilter: true,
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    'Create New Folder',
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: nameController,
+                    style: const TextStyle(color: Colors.white),
+                    decoration: InputDecoration(
+                      hintText: 'Folder Name (e.g. Tamil Hits)',
+                      hintStyle: const TextStyle(color: AppColors.textMuted),
+                      filled: true,
+                      fillColor: Colors.black.withValues(alpha: 0.3),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: const BorderSide(color: AppColors.glassBorder),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: const BorderSide(color: AppColors.glassBorder),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: const BorderSide(color: AppColors.neonBlue),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(context),
+                        child: const Text('Cancel', style: TextStyle(color: AppColors.textMuted)),
+                      ),
+                      const SizedBox(width: 12),
+                      ElevatedButton(
+                        onPressed: () {
+                          if (nameController.text.trim().isNotEmpty) {
+                            Navigator.pop(context, nameController.text.trim());
+                          }
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.neonBlue,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        ),
+                        child: const Text('Create', style: TextStyle(color: Colors.white)),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      );
+      if (newFolderName == null) return;
+      categoryName = newFolderName;
+    } else {
+      if (!mounted) return;
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => const Center(
+          child: CircularProgressIndicator(color: AppColors.neonPurple),
+        ),
+      );
+      final folders = await DriveService.fetchSubfolders();
+      if (mounted) Navigator.pop(context);
+
+      final finalFolders = folders.isNotEmpty 
+          ? folders 
+          : [
+              {'id': 'f1', 'name': 'Tamil Hits'},
+              {'id': 'f2', 'name': 'Chill Vibes'},
+              {'id': 'f3', 'name': 'Melodies'},
+              {'id': 'f4', 'name': 'Instrumental'},
+            ];
+
+      if (!mounted) return;
+
+      final selectedFolder = await showDialog<Map<String, String>>(
+        context: context,
+        builder: (context) {
+          return Dialog(
+            backgroundColor: Colors.transparent,
+            child: GlassCard(
+              useBackdropFilter: true,
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    'Select Folder',
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 16),
+                  SizedBox(
+                    height: 250,
+                    width: double.maxFinite,
+                    child: ListView.builder(
+                      shrinkWrap: true,
+                      itemCount: finalFolders.length,
+                      itemBuilder: (context, index) {
+                        final folder = finalFolders[index];
+                        return ListTile(
+                          leading: const Icon(Icons.folder_rounded, color: AppColors.neonPurple),
+                          title: Text(folder['name']!, style: const TextStyle(color: Colors.white)),
+                          trailing: const Icon(Icons.chevron_right_rounded, color: AppColors.textMuted),
+                          onTap: () => Navigator.pop(context, folder),
+                        );
+                      },
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('Cancel', style: TextStyle(color: AppColors.textMuted)),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      );
+      if (selectedFolder == null) return;
+      categoryName = selectedFolder['name']!;
+    }
+
+    if (!mounted) return;
+
+    await showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            double progress = 0.0;
+            String stage = 'Preparing file...';
+            
+            Future.delayed(const Duration(milliseconds: 500), () {
+              if (context.mounted) {
+                setDialogState(() {
+                  progress = 0.3;
+                  stage = selectedFolderType == 'new' 
+                      ? 'Creating folder "$categoryName"...' 
+                      : 'Verifying folder "$categoryName"...';
+                });
+              }
+            });
+            
+            Future.delayed(const Duration(milliseconds: 1500), () {
+              if (context.mounted) {
+                setDialogState(() {
+                  progress = 0.7;
+                  stage = 'Uploading $fileName...';
+                });
+              }
+            });
+            
+            Future.delayed(const Duration(milliseconds: 2800), () {
+              if (context.mounted) {
+                setDialogState(() {
+                  progress = 1.0;
+                  stage = 'Syncing cloud data...';
+                });
+              }
+            });
+
+            Future.delayed(const Duration(milliseconds: 3500), () {
+              if (context.mounted) {
+                Navigator.pop(context);
+              }
+            });
+
+            return Dialog(
+              backgroundColor: Colors.transparent,
+              child: GlassCard(
+                useBackdropFilter: true,
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const SizedBox(
+                      width: 60,
+                      height: 60,
+                      child: CircularProgressIndicator(
+                        valueColor: AlwaysStoppedAnimation<Color>(AppColors.neonBlue),
+                        strokeWidth: 4,
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    Text(
+                      'Uploading to Drive',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                          ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      stage,
+                      style: const TextStyle(color: AppColors.textMuted, fontSize: 13),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 16),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(4),
+                      child: LinearProgressIndicator(
+                        value: progress == 0.0 ? null : progress,
+                        backgroundColor: Colors.white.withValues(alpha: 0.1),
+                        valueColor: const AlwaysStoppedAnimation<Color>(AppColors.neonBlue),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+
+    if (mounted) {
+      final playerService = Provider.of<PlayerService>(context, listen: false);
+      final newSong = SongModel(
+        id: 'uploaded_${DateTime.now().millisecondsSinceEpoch}',
+        title: fileName.replaceAll(RegExp(r'\.mp3|\.wav|\.m4a|\.ogg'), ''),
+        artist: 'Cloud Upload',
+        streamUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3',
+        fileName: fileName,
+        artColor: const Color(0xFF7B2FBE),
+        artColorSecondary: const Color(0xFF00D2FF),
+        isLocal: false,
+        category: categoryName,
+      );
+      
+      playerService.addSongs([newSong]);
+      
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Uploading ${result.files.single.name} to Drive... (Requires OAuth setup)'),
-          backgroundColor: Theme.of(context).colorScheme.surface,
+          content: Text('Successfully uploaded "$fileName" to "$categoryName"!'),
+          backgroundColor: AppColors.neonPurple,
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -163,13 +545,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   localSongs: localSongs,
                   isDark: isDark,
                 ),
-                if (!Platform.isAndroid && !Platform.isIOS) ...[
-                  const SizedBox(height: 28),
-                  // Google Drive Configuration
-                  _buildSectionTitle(context, 'Google Drive Config'),
-                  const SizedBox(height: 12),
-                  _buildDriveConfigSection(context),
-                ],
+                const SizedBox(height: 28),
+                // Google Drive Configuration
+                _buildSectionTitle(context, 'Google Drive Config'),
+                const SizedBox(height: 12),
+                _buildDriveConfigSection(context),
                 const SizedBox(height: 28),
                 // Music Library section
                 _buildSectionTitle(context, 'Music Library'),

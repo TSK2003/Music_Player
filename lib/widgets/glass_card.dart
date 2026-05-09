@@ -10,9 +10,12 @@ class GlassCard extends StatefulWidget {
   final EdgeInsetsGeometry? padding;
   final EdgeInsetsGeometry? margin;
   final VoidCallback? onTap;
+  final VoidCallback? onLongPress;
   final bool enableLiftEffect;
   final double? width;
   final double? height;
+
+  final bool useBackdropFilter;
 
   const GlassCard({
     super.key,
@@ -24,9 +27,11 @@ class GlassCard extends StatefulWidget {
     this.padding,
     this.margin,
     this.onTap,
+    this.onLongPress,
     this.enableLiftEffect = true,
     this.width,
     this.height,
+    this.useBackdropFilter = false,
   });
 
   @override
@@ -96,6 +101,7 @@ class _GlassCardState extends State<GlassCard>
             onTapUp: _handleTapUp,
             onTapCancel: _handleTapCancel,
             onTap: widget.onTap,
+            onLongPress: widget.onLongPress,
             child: Container(
               width: widget.width,
               height: widget.height,
@@ -124,30 +130,47 @@ class _GlassCardState extends State<GlassCard>
               ),
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(widget.borderRadius),
-                child: BackdropFilter(
-                  filter: ImageFilter.blur(
-                    sigmaX: widget.blur,
-                    sigmaY: widget.blur,
-                  ),
-                  child: Container(
-                    padding: widget.padding ?? const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(widget.borderRadius),
-                      // Clean glass fill
-                      color: isDark 
-                          ? Colors.black.withValues(alpha: 0.2) // Dark mode frosted
-                          : Colors.white.withValues(alpha: widget.opacity + 0.15), // Light mode highly frosted white
-                      // Crisp glass edge
-                      border: Border.all(
-                        color: isDark 
-                            ? Colors.white.withValues(alpha: 0.1)
-                            : Colors.white.withValues(alpha: 0.5),
-                        width: 1,
+                child: widget.useBackdropFilter && widget.blur > 0
+                    ? BackdropFilter(
+                        filter: ImageFilter.blur(
+                          sigmaX: widget.blur,
+                          sigmaY: widget.blur,
+                        ),
+                        child: Container(
+                          padding: widget.padding ?? const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(widget.borderRadius),
+                            // Clean glass fill
+                            color: isDark 
+                                ? Colors.black.withValues(alpha: 0.2) // Dark mode frosted
+                                : Colors.white.withValues(alpha: widget.opacity + 0.15), // Light mode highly frosted white
+                            // Crisp glass edge
+                            border: Border.all(
+                              color: isDark 
+                                  ? Colors.white.withValues(alpha: 0.1)
+                                  : Colors.white.withValues(alpha: 0.5),
+                              width: 1,
+                            ),
+                          ),
+                          child: child,
+                        ),
+                      )
+                    : Container(
+                        padding: widget.padding ?? const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(widget.borderRadius),
+                          color: isDark 
+                              ? Colors.white.withValues(alpha: 0.06) // Sleek transparent fill
+                              : Colors.black.withValues(alpha: 0.03),
+                          border: Border.all(
+                            color: isDark 
+                                ? Colors.white.withValues(alpha: 0.08)
+                                : Colors.black.withValues(alpha: 0.05),
+                            width: 1,
+                          ),
+                        ),
+                        child: child,
                       ),
-                    ),
-                    child: child,
-                  ),
-                ),
               ),
             ),
           ),

@@ -111,13 +111,13 @@ class PlayerService extends ChangeNotifier {
 
       final mediaItem = MediaItem(
         id: song.streamUrl,
-        album: song.isLocal ? 'Local Music' : 'Music Player',
+        album: song.isLocal ? 'Local Music' : (song.isYouTube ? 'YouTube' : 'Music Player'),
         title: song.title,
         artist: song.artist,
-        artUri: null,
+        artUri: song.thumbnailUrl != null ? Uri.tryParse(song.thumbnailUrl!) : null,
         extras: {
           'songId': song.id,
-          'isLocal': song.isLocal,
+          'isLocal': song.isLocal, // YouTube songs may stream via URL or play from cache
         },
       );
 

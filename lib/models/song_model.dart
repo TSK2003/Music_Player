@@ -10,6 +10,8 @@ class SongModel {
   final Color artColorSecondary;
   final bool isLocal;
   final String? category;
+  final String? thumbnailUrl;
+  final Duration? duration;
 
   SongModel({
     required this.id,
@@ -21,7 +23,41 @@ class SongModel {
     required this.artColorSecondary,
     this.isLocal = false,
     this.category,
+    this.thumbnailUrl,
+    this.duration,
   });
+
+  /// Whether this song is from YouTube
+  bool get isYouTube => id.startsWith('yt_');
+
+  /// Create from a YouTube video with extracted audio stream URL
+  factory SongModel.fromYouTube({
+    required String videoId,
+    required String title,
+    required String artist,
+    required String streamUrl,
+    required String thumbnailUrl,
+    Duration? duration,
+  }) {
+    // Generate consistent colors from video ID hash
+    final hash = videoId.hashCode;
+    final hue1 = (hash.abs() % 360).toDouble();
+    final hue2 = ((hash.abs() * 7 + 137) % 360).toDouble();
+
+    return SongModel(
+      id: 'yt_$videoId',
+      title: title,
+      artist: artist,
+      streamUrl: streamUrl,
+      fileName: '$title.m4a',
+      thumbnailUrl: thumbnailUrl,
+      duration: duration,
+      artColor: HSLColor.fromAHSL(1.0, hue1, 0.7, 0.4).toColor(),
+      artColorSecondary: HSLColor.fromAHSL(1.0, hue2, 0.6, 0.3).toColor(),
+      isLocal: false,
+      category: 'YouTube',
+    );
+  }
 
   /// Create from a Google Drive file.
   /// Uses googleapis.com direct media URL which doesn't redirect

@@ -1,3 +1,4 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/song_model.dart';
@@ -9,14 +10,20 @@ import 'glow_button.dart' show NeonAnimatedBuilder;
 class SongCard extends StatelessWidget {
   final SongModel song;
   final VoidCallback onTap;
+  final VoidCallback? onLongPress;
   final bool isPlaying;
+  final bool isSelected;
+  final bool selectionMode;
   final int index;
 
   const SongCard({
     super.key,
     required this.song,
     required this.onTap,
+    this.onLongPress,
     this.isPlaying = false,
+    this.isSelected = false,
+    this.selectionMode = false,
     required this.index,
   });
 
@@ -27,12 +34,40 @@ class SongCard extends StatelessWidget {
 
     return GlassCard(
         onTap: onTap,
-        glowColor: isPlaying ? AppColors.neonBlue : null,
+        onLongPress: onLongPress,
+        glowColor: isPlaying ? AppColors.neonBlue : (isSelected ? AppColors.neonPurple : null),
         margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         child: Row(
           children: [
-            // Album art circle
+            // Selection checkbox
+            if (selectionMode)
+              Padding(
+                padding: const EdgeInsets.only(right: 10),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  width: 24,
+                  height: 24,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: isSelected
+                        ? AppColors.neonBlue
+                        : Colors.transparent,
+                    border: Border.all(
+                      color: isSelected
+                          ? AppColors.neonBlue
+                          : (Theme.of(context).brightness == Brightness.dark
+                              ? AppColors.textMuted
+                              : AppColors.lightTextMuted),
+                      width: 2,
+                    ),
+                  ),
+                  child: isSelected
+                      ? const Icon(Icons.check, size: 14, color: Colors.white)
+                      : null,
+                ),
+              ),
+            // Album art
             Hero(
               tag: 'album_art_${song.id}',
               child: Container(
@@ -40,11 +75,13 @@ class SongCard extends StatelessWidget {
                 height: 52,
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(14),
-                  gradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [song.artColor, song.artColorSecondary],
-                  ),
+                  gradient: song.thumbnailUrl == null
+                      ? LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: [song.artColor, song.artColorSecondary],
+                        )
+                      : null,
                   boxShadow: isPlaying
                       ? AppColors.neonGlow(song.artColor, intensity: 0.3)
                       : [
@@ -55,38 +92,111 @@ class SongCard extends StatelessWidget {
                           ),
                         ],
                 ),
-                child: Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    Icon(
-                      isPlaying ? Icons.equalizer_rounded : Icons.music_note_rounded,
-                      color: Colors.white.withValues(alpha: 0.9),
-                      size: 24,
-                    ),
-                    // Local file indicator
-                    if (song.isLocal)
-                      Positioned(
-                        bottom: 4,
-                        right: 4,
-                        child: Container(
-                          width: 14,
-                          height: 14,
-                          decoration: BoxDecoration(
-                            color: AppColors.accentCyan.withValues(alpha: 0.9),
-                            shape: BoxShape.circle,
-                            border: Border.all(
-                              color: Colors.black.withValues(alpha: 0.3),
-                              width: 1,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(14),
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      // Thumbnail or gradient fallback
+                      if (song.thumbnailUrl != null)
+                        CachedNetworkImage(
+                          imageUrl: song.thumbnailUrl!,
+                          fit: BoxFit.cover,
+                          width: 52,
+                          height: 52,
+                          placeholder: (context, url) => Container(
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                                colors: [song.artColor, song.artColorSecondary],
+                              ),
+                            ),
+                            child: Icon(
+                              Icons.music_note_rounded,
+                              color: Colors.white.withValues(alpha: 0.7),
+                              size: 24,
                             ),
                           ),
-                          child: const Icon(
-                            Icons.folder_rounded,
-                            color: Colors.white,
-                            size: 8,
+                          errorWidget: (context, url, error) => Container(
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                                colors: [song.artColor, song.artColorSecondary],
+                              ),
+                            ),
+                            child: Icon(
+                              Icons.music_note_rounded,
+                              color: Colors.white.withValues(alpha: 0.7),
+                              size: 24,
+                            ),
+                          ),
+                        )
+                      else
+                        Icon(
+                          isPlaying ? Icons.equalizer_rounded : Icons.music_note_rounded,
+                          color: Colors.white.withValues(alpha: 0.9),
+                          size: 24,
+                        ),
+                      // Playing overlay for thumbnails
+                      if (isPlaying && song.thumbnailUrl != null)
+                        Container(
+                          color: Colors.black.withValues(alpha: 0.4),
+                          child: Icon(
+                            Icons.equalizer_rounded,
+                            color: Colors.white.withValues(alpha: 0.9),
+                            size: 24,
                           ),
                         ),
-                      ),
-                  ],
+                      // YouTube badge
+                      if (song.isYouTube)
+                        Positioned(
+                          bottom: 3,
+                          right: 3,
+                          child: Container(
+                            width: 14,
+                            height: 14,
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFFF0000).withValues(alpha: 0.9),
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: Colors.black.withValues(alpha: 0.3),
+                                width: 1,
+                              ),
+                            ),
+                            child: const Icon(
+                              Icons.play_arrow_rounded,
+                              color: Colors.white,
+                              size: 8,
+                            ),
+                          ),
+                        ),
+                      // Local file indicator
+                      if (song.isLocal)
+                        Positioned(
+                          bottom: 3,
+                          right: 3,
+                          child: Container(
+                            width: 14,
+                            height: 14,
+                            decoration: BoxDecoration(
+                              color: AppColors.accentCyan.withValues(alpha: 0.9),
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: Colors.black.withValues(alpha: 0.3),
+                                width: 1,
+                              ),
+                            ),
+                            child: const Icon(
+                              Icons.folder_rounded,
+                              color: Colors.white,
+                              size: 8,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
                 ),
               ),
             ),
