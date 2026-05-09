@@ -742,6 +742,46 @@ class _YouTubeSearchScreenState extends State<YouTubeSearchScreen>
                       ),
                 ),
                 const Spacer(),
+                // Select button
+                if (!_selectionMode)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: GestureDetector(
+                      onTap: () {
+                        setState(() => _selectionMode = true);
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                        decoration: BoxDecoration(
+                          color: isDark
+                              ? Colors.white.withValues(alpha: 0.06)
+                              : Colors.black.withValues(alpha: 0.04),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: isDark ? AppColors.glassBorder : AppColors.lightGlassBorder,
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.checklist_rounded,
+                              size: 14,
+                              color: isDark ? AppColors.textMuted : AppColors.lightTextMuted,
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              'Select',
+                              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                    fontSize: 11,
+                                    color: isDark ? AppColors.textMuted : AppColors.lightTextMuted,
+                                  ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
                 GestureDetector(
                   onTap: _loadTrending,
                   child: Container(
