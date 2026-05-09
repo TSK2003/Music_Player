@@ -87,7 +87,11 @@ class _YouTubeSearchScreenState extends State<YouTubeSearchScreen>
       return;
     }
 
-    _debounce = Timer(const Duration(milliseconds: 600), () {
+    // Don't search until at least 3 characters typed
+    if (query.trim().length < 3) return;
+
+    // Increased debounce to reduce API calls
+    _debounce = Timer(const Duration(milliseconds: 1500), () {
       _performSearch(query.trim());
     });
   }

@@ -1,5 +1,7 @@
+import 'dart:io';
 import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
 import '../models/song_model.dart';
 import '../services/drive_service.dart';
@@ -155,16 +157,36 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   }
 
   Future<void> _downloadSelected(List<SongModel> allSongs) async {
-    final selected = allSongs.where((s) => _selectedIds.contains(s.id) && s.isYouTube).toList();
+    final selected = allSongs.where((s) => _selectedIds.contains(s.id)).toList();
     if (selected.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: const Text('No YouTube songs selected to download'),
+          content: const Text('No songs selected'),
           backgroundColor: AppColors.accentPink.withValues(alpha: 0.9),
           behavior: SnackBarBehavior.floating,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         ),
       );
+      return;
+    }
+
+    // Filter out songs that are already local files
+    final localSongs = selected.where((s) => s.isLocal).toList();
+    final downloadable = selected.where((s) => !s.isLocal).toList();
+
+    if (downloadable.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('${localSongs.length} song(s) already on device'),
+          backgroundColor: Colors.green.withValues(alpha: 0.9),
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        ),
+      );
+      setState(() {
+        _selectionMode = false;
+        _selectedIds.clear();
+      });
       return;
     }
 
@@ -176,7 +198,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     final messenger = ScaffoldMessenger.of(context);
     messenger.showSnackBar(
       SnackBar(
-        content: Text('Downloading ${selected.length} song(s)...'),
+        content: Text('Downloading ${downloadable.length} song(s)...'),
         backgroundColor: const Color(0xFFFF4444).withValues(alpha: 0.9),
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -186,17 +208,37 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
     int success = 0;
     int failed = 0;
-    for (final song in selected) {
+
+    final dlDir = await YouTubeService.getDownloadsDir();
+
+    for (final song in downloadable) {
       try {
-        final videoId = song.id.replaceFirst('yt_', '');
-        final result = YouTubeResult(
-          videoId: videoId,
-          title: song.title,
-          author: song.artist,
-          duration: song.duration,
-          thumbnailUrl: song.thumbnailUrl ?? '',
-        );
-        await YouTubeService.downloadPermanently(result);
+        if (song.isYouTube) {
+          // YouTube songs: use YouTubeService
+          final videoId = song.id.replaceFirst('yt_', '');
+          final result = YouTubeResult(
+            videoId: videoId,
+            title: song.title,
+            author: song.artist,
+            duration: song.duration,
+            thumbnailUrl: song.thumbnailUrl ?? '',
+          );
+          await YouTubeService.downloadPermanently(result);
+        } else {
+          // Drive/cloud songs: download via HTTP
+          final uri = song.streamUrl;
+          if (uri.startsWith('http')) {
+            final response = await http.get(Uri.parse(uri));
+            if (response.statusCode == 200) {
+              final safeName = song.title.replaceAll(RegExp(r'[<>:"/\\|?*]'), '_');
+              final filePath = '${dlDir.path}${Platform.pathSeparator}$safeName.m4a';
+              await File(filePath).writeAsBytes(response.bodyBytes);
+              debugPrint('[HomeScreen] Downloaded Drive song: $filePath');
+            } else {
+              throw Exception('HTTP ${response.statusCode}');
+            }
+          }
+        }
         success++;
       } catch (e) {
         failed++;

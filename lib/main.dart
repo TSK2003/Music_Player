@@ -22,8 +22,13 @@ Future<void> main() async {
 
   // Initialize media_kit for Windows/Linux audio support
   if (defaultTargetPlatform == TargetPlatform.windows ||
-      defaultTargetPlatform == TargetPlatform.linux) {
-    JustAudioMediaKit.ensureInitialized();
+      defaultTargetPlatform == TargetPlatform.linux ||
+      defaultTargetPlatform == TargetPlatform.macOS) {
+    JustAudioMediaKit.ensureInitialized(
+      windows: true,
+      linux: true,
+      macOS: true,
+    );
   }
 
   // Set system UI overlay style

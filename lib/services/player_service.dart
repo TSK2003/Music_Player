@@ -91,15 +91,24 @@ class PlayerService extends ChangeNotifier {
   }
 
   /// Play a song — loads single song, keeps playlist reference for next/prev
-  Future<void> playSong(SongModel song, {List<SongModel>? playlist}) async {
-    try {
-      _isLoading = true;
-      _error = null;
-      _currentSong = song;
-      _currentPlaylist = playlist ?? _songs;
-      _currentIndex = _currentPlaylist.indexWhere((s) => s.id == song.id);
-      notifyListeners();
+  int _loadId = 0;
 
+  Future<void> playSong(SongModel song, {List<SongModel>? playlist}) async {
+    final currentLoadId = ++_loadId;
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
+
+    try {
+      if (playlist != null) {
+        _currentPlaylist = playlist;
+      } else if (_currentPlaylist.isEmpty) {
+        _currentPlaylist = [song];
+      }
+
+      _currentSong = song;
+      _currentIndex = _currentPlaylist.indexWhere((s) => s.id == song.id);
+      
       if (_currentIndex == -1) {
         _currentIndex = 0;
       }
@@ -117,20 +126,28 @@ class PlayerService extends ChangeNotifier {
         artUri: song.thumbnailUrl != null ? Uri.tryParse(song.thumbnailUrl!) : null,
         extras: {
           'songId': song.id,
-          'isLocal': song.isLocal, // YouTube songs may stream via URL or play from cache
+          'isLocal': song.isLocal,
         },
       );
 
-      await audioHandler.loadSingle(mediaItem);
-      await audioHandler.play();
+      // If a new song was selected while we were prepping this one, abort.
+      if (_loadId != currentLoadId) return;
 
-      _isLoading = false;
-      notifyListeners();
+      await audioHandler.loadSingle(mediaItem);
+      
+      if (_loadId != currentLoadId) return;
+      
+      await audioHandler.play();
     } catch (e) {
-      _isLoading = false;
-      _error = 'Failed to play: ${e.toString()}';
-      debugPrint('[PlayerService] Error: $_error');
-      notifyListeners();
+      if (_loadId == currentLoadId) {
+        _error = 'Failed to play: ${e.toString()}';
+        debugPrint('[PlayerService] Error: $_error');
+      }
+    } finally {
+      if (_loadId == currentLoadId) {
+        _isLoading = false;
+        notifyListeners();
+      }
     }
   }  /// Toggle play/pause
   Future<void> togglePlayPause() async {

@@ -38,17 +38,58 @@ class YouTubeService {
   static YoutubeExplode? _yt;
   // Prevents concurrent downloads of the same video
   static final Map<String, Future<String>> _activeDownloads = {};
+  // Cache trending results to avoid re-fetching and rate limiting
+  static List<YouTubeResult>? _trendingCache;
+  static DateTime? _trendingCacheTime;
+  static const _trendingCacheDuration = Duration(minutes: 5);
+  // Rate limit cooldown — don't make requests while rate limited
+  static DateTime? _rateLimitedUntil;
 
   static YoutubeExplode get _client {
     _yt ??= YoutubeExplode();
     return _yt!;
   }
 
+  /// Create a fresh client WITHOUT closing the old one.
+  /// Closing the old one kills pending requests → HttpClientClosedException.
+  static void _freshClient() {
+    _yt = YoutubeExplode(); // Old client is GC'd naturally
+  }
+
+  /// Check if we're currently rate limited
+  static bool get _isRateLimited {
+    if (_rateLimitedUntil == null) return false;
+    if (DateTime.now().isAfter(_rateLimitedUntil!)) {
+      _rateLimitedUntil = null;
+      return false;
+    }
+    return true;
+  }
+
+  /// Mark rate limited for a duration
+  static void _markRateLimited({int seconds = 30}) {
+    _rateLimitedUntil = DateTime.now().add(Duration(seconds: seconds));
+    debugPrint('[YouTubeService] ⚠ Rate limited. Cooldown for ${seconds}s');
+  }
+
   /// Search YouTube for videos matching the query.
-  /// In youtube_explode_dart v3, search() returns VideoSearchList
-  /// containing Video objects (not SearchVideo).
-  static Future<List<YouTubeResult>> search(String query,
-      {int maxResults = 20}) async {
+  static Future<List<YouTubeResult>> search(
+    String query, {
+    int maxResults = 20,
+  }) async {
+    // Don't search for very short queries — reduces unnecessary API calls
+    if (query.trim().length < 3) {
+      return [];
+    }
+
+    // Respect rate limit cooldown
+    if (_isRateLimited) {
+      debugPrint('[YouTubeService] Skipping search — rate limited');
+      throw Exception(
+        'YouTube is temporarily rate limited. Please wait a moment and try again.',
+      );
+    }
+
     try {
       debugPrint('[YouTubeService] Searching: "$query"');
       final searchResults = await _client.search.search(query);
@@ -56,69 +97,100 @@ class YouTubeService {
       final results = <YouTubeResult>[];
       for (final video in searchResults) {
         if (results.length >= maxResults) break;
-        results.add(YouTubeResult(
-          videoId: video.id.value,
-          title: video.title,
-          author: video.author,
-          duration: video.duration,
-          thumbnailUrl: video.thumbnails.highResUrl,
-        ));
+        results.add(
+          YouTubeResult(
+            videoId: video.id.value,
+            title: video.title,
+            author: video.author,
+            duration: video.duration,
+            thumbnailUrl: video.thumbnails.highResUrl,
+          ),
+        );
       }
       debugPrint('[YouTubeService] Found ${results.length} results');
       return results;
     } catch (e) {
       debugPrint('[YouTubeService] Search error: $e');
+      if (e.toString().contains('RequestLimitExceeded')) {
+        _markRateLimited();
+        _freshClient();
+      }
       rethrow;
     }
   }
 
-  /// Fetch trending / popular music videos to show on the YouTube home page.
-  static Future<List<YouTubeResult>> fetchTrending() async {
-    try {
-      final queries = [
-        'new tamil songs 2025',
-        'trending music videos 2025',
-      ];
+  /// Fetch trending / popular music videos. Results are cached for 5 minutes.
+  static Future<List<YouTubeResult>> fetchTrending({
+    bool forceRefresh = false,
+  }) async {
+    // Return cache if still valid
+    if (!forceRefresh &&
+        _trendingCache != null &&
+        _trendingCacheTime != null &&
+        DateTime.now().difference(_trendingCacheTime!) <
+            _trendingCacheDuration) {
+      debugPrint(
+        '[YouTubeService] Using cached trending (${_trendingCache!.length} songs)',
+      );
+      return _trendingCache!;
+    }
 
+    try {
       final results = <YouTubeResult>[];
       final seenIds = <String>{};
 
-      for (final query in queries) {
-        try {
-          final searchResults = await _client.search.search(query);
-          for (final video in searchResults) {
-            if (video.duration != null && video.duration!.inMinutes > 15) {
-              continue;
-            }
-
-            if (!seenIds.contains(video.id.value)) {
-              seenIds.add(video.id.value);
-              results.add(YouTubeResult(
+      // Use ONE query to reduce API calls and avoid rate limiting
+      try {
+        final searchResults = await _client.search.search(
+          'new tamil songs 2025',
+        );
+        for (final video in searchResults) {
+          if (video.duration != null && video.duration!.inMinutes > 15) {
+            continue;
+          }
+          if (!seenIds.contains(video.id.value)) {
+            seenIds.add(video.id.value);
+            results.add(
+              YouTubeResult(
                 videoId: video.id.value,
                 title: video.title,
                 author: video.author,
                 duration: video.duration,
                 thumbnailUrl: video.thumbnails.highResUrl,
-              ));
-            }
+              ),
+            );
           }
-        } catch (e) {
-          debugPrint('[YouTubeService] Trending query "$query" failed: $e');
+        }
+      } catch (e) {
+        debugPrint('[YouTubeService] Trending query failed: $e');
+        if (e.toString().contains('RequestLimitExceeded')) {
+          _markRateLimited();
+          _freshClient();
+          if (_trendingCache != null) return _trendingCache!;
         }
       }
 
       debugPrint('[YouTubeService] Loaded ${results.length} trending songs');
+
+      // Cache the results
+      if (results.isNotEmpty) {
+        _trendingCache = results;
+        _trendingCacheTime = DateTime.now();
+      }
+
       return results;
     } catch (e) {
       debugPrint('[YouTubeService] Trending error: $e');
-      return [];
+      return _trendingCache ?? [];
     }
   }
 
   /// Get the cache directory for downloaded YouTube audio.
   static Future<Directory> _getCacheDir() async {
     final appDir = await getApplicationSupportDirectory();
-    final cacheDir = Directory('${appDir.path}${Platform.pathSeparator}yt_cache');
+    final cacheDir = Directory(
+      '${appDir.path}${Platform.pathSeparator}yt_cache',
+    );
     if (!await cacheDir.exists()) {
       await cacheDir.create(recursive: true);
     }
@@ -128,7 +200,9 @@ class YouTubeService {
   /// Get the downloads directory for permanently saved songs.
   static Future<Directory> getDownloadsDir() async {
     final appDir = await getApplicationSupportDirectory();
-    final dlDir = Directory('${appDir.path}${Platform.pathSeparator}yt_downloads');
+    final dlDir = Directory(
+      '${appDir.path}${Platform.pathSeparator}yt_downloads',
+    );
     if (!await dlDir.exists()) {
       await dlDir.create(recursive: true);
     }
@@ -142,7 +216,9 @@ class YouTubeService {
 
     // Check downloads first (with both extensions)
     for (final ext in ['m4a', 'webm']) {
-      final dlFile = File('${dlDir.path}${Platform.pathSeparator}$videoId.$ext');
+      final dlFile = File(
+        '${dlDir.path}${Platform.pathSeparator}$videoId.$ext',
+      );
       if (await dlFile.exists() && await dlFile.length() > 1000) {
         return dlFile.path;
       }
@@ -150,7 +226,9 @@ class YouTubeService {
 
     // Then check cache
     for (final ext in ['m4a', 'webm']) {
-      final cacheFile = File('${cacheDir.path}${Platform.pathSeparator}$videoId.$ext');
+      final cacheFile = File(
+        '${cacheDir.path}${Platform.pathSeparator}$videoId.$ext',
+      );
       if (await cacheFile.exists() && await cacheFile.length() > 1000) {
         return cacheFile.path;
       }
@@ -162,23 +240,31 @@ class YouTubeService {
   /// Select the best audio stream for playback.
   /// Prefers AAC/MP4 (mp4a.40.2) for maximum compatibility with MPV on Windows.
   /// Falls back to Opus/WebM if no AAC is available.
-  static AudioOnlyStreamInfo _selectBestStream(List<AudioOnlyStreamInfo> streams) {
+  static AudioOnlyStreamInfo _selectBestStream(
+    List<AudioOnlyStreamInfo> streams,
+  ) {
     // Separate into AAC (MP4) and Opus (WebM) streams
     final aacStreams = streams
-        .where((s) => s.container.name == 'mp4' || s.audioCodec.startsWith('mp4a'))
+        .where(
+          (s) => s.container.name == 'mp4' || s.audioCodec.startsWith('mp4a'),
+        )
         .toList();
     final opusStreams = streams
         .where((s) => s.container.name == 'webm' || s.audioCodec == 'opus')
         .toList();
 
-    debugPrint('[YouTubeService] AAC streams: ${aacStreams.length}, Opus streams: ${opusStreams.length}');
+    debugPrint(
+      '[YouTubeService] AAC streams: ${aacStreams.length}, Opus streams: ${opusStreams.length}',
+    );
 
     // Prefer AAC for best Windows/MPV compatibility
     if (aacStreams.isNotEmpty) {
       aacStreams.sort((a, b) => b.bitrate.compareTo(a.bitrate));
       final best = aacStreams.first;
-      debugPrint('[YouTubeService] ✓ Selected AAC: ${best.bitrate.kiloBitsPerSecond.toStringAsFixed(0)} kbps, '
-          'codec: ${best.audioCodec}, container: ${best.container.name}');
+      debugPrint(
+        '[YouTubeService] ✓ Selected AAC: ${best.bitrate.kiloBitsPerSecond.toStringAsFixed(0)} kbps, '
+        'codec: ${best.audioCodec}, container: ${best.container.name}',
+      );
       return best;
     }
 
@@ -186,8 +272,10 @@ class YouTubeService {
     if (opusStreams.isNotEmpty) {
       opusStreams.sort((a, b) => b.bitrate.compareTo(a.bitrate));
       final best = opusStreams.first;
-      debugPrint('[YouTubeService] ✓ Selected Opus: ${best.bitrate.kiloBitsPerSecond.toStringAsFixed(0)} kbps, '
-          'codec: ${best.audioCodec}, container: ${best.container.name}');
+      debugPrint(
+        '[YouTubeService] ✓ Selected Opus: ${best.bitrate.kiloBitsPerSecond.toStringAsFixed(0)} kbps, '
+        'codec: ${best.audioCodec}, container: ${best.container.name}',
+      );
       return best;
     }
 
@@ -198,19 +286,61 @@ class YouTubeService {
 
   /// Get the direct audio stream URL for a video — for INSTANT streaming playback.
   /// The player (just_audio + media_kit) handles buffering/streaming natively.
+  /// Includes retry with backoff for rate limiting.
   static Future<String> getStreamUrl(String videoId) async {
-    debugPrint('[YouTubeService] Getting stream URL for $videoId...');
-    final manifest = await _client.videos.streams.getManifest(videoId);
-    final audioStreams = manifest.audioOnly.toList();
-
-    if (audioStreams.isEmpty) {
-      throw Exception('No audio streams found for video $videoId');
+    if (_isRateLimited) {
+      throw Exception(
+        'YouTube is temporarily rate limited. Please wait a moment and try again.',
+      );
     }
 
-    final bestAudio = _selectBestStream(audioStreams);
-    final url = bestAudio.url.toString();
-    debugPrint('[YouTubeService] ✓ Stream URL ready (${bestAudio.bitrate.kiloBitsPerSecond.toStringAsFixed(0)} kbps)');
-    return url;
+    for (int attempt = 0; attempt < 3; attempt++) {
+      try {
+        if (attempt > 0) {
+          final delay = Duration(seconds: 10 * attempt);
+          debugPrint(
+            '[YouTubeService] Retry $attempt after ${delay.inSeconds}s...',
+          );
+          await Future.delayed(delay);
+          _freshClient();
+        }
+
+        debugPrint('[YouTubeService] Getting stream URL for $videoId...');
+        final manifest = await _client.videos.streams.getManifest(videoId);
+        final audioStreams = manifest.audioOnly.toList();
+
+        if (audioStreams.isEmpty) {
+          throw Exception('No audio streams found for video $videoId');
+        }
+
+        final bestAudio = _selectBestStream(audioStreams);
+        final url = bestAudio.url.toString();
+        debugPrint(
+          '[YouTubeService] ✓ Stream URL ready '
+          '(${bestAudio.bitrate.kiloBitsPerSecond.toStringAsFixed(0)} kbps)',
+        );
+
+        final isWebm = bestAudio.container.name == 'webm';
+        final proxyUrl = await YouTubeProxyServer.startProxy(
+          url,
+          contentType: isWebm ? 'audio/webm' : 'audio/mp4',
+          extension: isWebm ? 'webm' : 'm4a',
+        );
+        return proxyUrl;
+      } catch (e) {
+        if (e.toString().contains('RequestLimitExceeded') && attempt < 2) {
+          debugPrint('[YouTubeService] Rate limited, will retry...');
+          _markRateLimited(seconds: 15);
+          continue;
+        }
+        if (e.toString().contains('RequestLimitExceeded')) {
+          _markRateLimited();
+          _freshClient();
+        }
+        rethrow;
+      }
+    }
+    throw Exception('Failed to get stream URL after retries');
   }
 
   /// Extract audio for INSTANT playback — returns SongModel with stream URL.
@@ -255,7 +385,9 @@ class YouTubeService {
     required String videoId,
     required String targetDir,
   }) async {
-    debugPrint('[YouTubeService] Getting stream manifest for download: $videoId');
+    debugPrint(
+      '[YouTubeService] Getting stream manifest for download: $videoId',
+    );
 
     final manifest = await _client.videos.streams.getManifest(videoId);
     final audioStreams = manifest.audioOnly.toList();
@@ -280,7 +412,9 @@ class YouTubeService {
     final totalBytes = bestAudio.size.totalBytes;
     final downloadUrl = bestAudio.url.toString();
 
-    debugPrint('[YouTubeService] Downloading ${(totalBytes / 1024 / 1024).toStringAsFixed(1)} MB via HTTP → $targetPath');
+    debugPrint(
+      '[YouTubeService] Downloading ${(totalBytes / 1024 / 1024).toStringAsFixed(1)} MB via HTTP → $targetPath',
+    );
 
     try {
       // Use HTTP client for reliable downloading on Windows
@@ -305,8 +439,10 @@ class YouTubeService {
           final percent = (downloadedBytes * 100 ~/ totalBytes);
           if (percent >= lastLogPercent + 10) {
             lastLogPercent = percent;
-            debugPrint('[YouTubeService] Download progress: $percent% '
-                '(${(downloadedBytes / 1024 / 1024).toStringAsFixed(1)} MB)');
+            debugPrint(
+              '[YouTubeService] Download progress: $percent% '
+              '(${(downloadedBytes / 1024 / 1024).toStringAsFixed(1)} MB)',
+            );
           }
         }
       }
@@ -316,7 +452,9 @@ class YouTubeService {
 
       // Verify file size
       final fileSize = await File(tempPath).length();
-      debugPrint('[YouTubeService] Downloaded: ${(fileSize / 1024 / 1024).toStringAsFixed(1)} MB');
+      debugPrint(
+        '[YouTubeService] Downloaded: ${(fileSize / 1024 / 1024).toStringAsFixed(1)} MB',
+      );
 
       if (fileSize < 1000) {
         throw Exception('Downloaded file too small: $fileSize bytes');
@@ -356,7 +494,9 @@ class YouTubeService {
 
     // If a download is already in progress for this video, wait for it
     if (_activeDownloads.containsKey(downloadKey)) {
-      debugPrint('[YouTubeService] Waiting for in-progress download: $downloadKey');
+      debugPrint(
+        '[YouTubeService] Waiting for in-progress download: $downloadKey',
+      );
       return _activeDownloads[downloadKey]!;
     }
 
@@ -415,4 +555,130 @@ class YouTubeService {
     _yt?.close();
     _yt = null;
   }
+}
+
+class YouTubeProxyServer {
+  static HttpServer? _server;
+  static final Map<String, _ProxyTarget> _streams = {};
+  static int _streamCounter = 0;
+
+  static Future<String> startProxy(
+    String sourceUrl, {
+    String contentType = 'audio/mp4',
+    String extension = 'm4a',
+  }) async {
+    if (_server == null) {
+      _server = await HttpServer.bind(
+        InternetAddress.loopbackIPv4,
+        0,
+        shared: true,
+      );
+
+      debugPrint('[YouTubeProxy] Started on port ${_server!.port}');
+
+      _server!.listen((HttpRequest request) async {
+        HttpClient? client;
+        try {
+          final pathSegment = request.uri.pathSegments.isEmpty
+              ? ''
+              : request.uri.pathSegments.first;
+          final streamId = pathSegment.split('.').first;
+          final target = _streams[streamId];
+
+          if (target == null) {
+            request.response.statusCode = 404;
+            await request.response.close();
+            return;
+          }
+
+          client = HttpClient();
+          client.userAgent =
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36';
+
+          final ytRequest = await client.getUrl(Uri.parse(target.sourceUrl));
+          ytRequest.followRedirects = true;
+
+          // Crucial: Forward the Range header from MPV to YouTube so it can seek the moov atom!
+          final rangeHeader = request.headers.value(HttpHeaders.rangeHeader);
+          if (rangeHeader != null) {
+            ytRequest.headers.set(HttpHeaders.rangeHeader, rangeHeader);
+          } else {
+            ytRequest.headers.set(HttpHeaders.acceptHeader, '*/*');
+          }
+
+          final ytResponse = await ytRequest.close();
+
+          request.response.headers.set(
+            HttpHeaders.contentTypeHeader,
+            target.contentType,
+          );
+          request.response.headers.set(HttpHeaders.acceptRangesHeader, 'bytes');
+          request.response.headers.set(
+            HttpHeaders.connectionHeader,
+            'keep-alive',
+          );
+          request.response.headers.set(
+            HttpHeaders.cacheControlHeader,
+            'no-cache',
+          );
+
+          // Pass through the exact status code (200 OK or 206 Partial Content)
+          request.response.statusCode = ytResponse.statusCode;
+
+          // Forward crucial length and range response headers back to MPV
+          final contentLength = ytResponse.headers.value(
+            HttpHeaders.contentLengthHeader,
+          );
+          if (contentLength != null) {
+            request.response.headers.set(
+              HttpHeaders.contentLengthHeader,
+              contentLength,
+            );
+          }
+          final contentRange = ytResponse.headers.value(
+            HttpHeaders.contentRangeHeader,
+          );
+          if (contentRange != null) {
+            request.response.headers.set(
+              HttpHeaders.contentRangeHeader,
+              contentRange,
+            );
+          }
+
+          await ytResponse.pipe(request.response);
+        } catch (e) {
+          debugPrint('[YouTubeProxy] ERROR: $e');
+          try {
+            request.response.statusCode = 500;
+            await request.response.close();
+          } catch (_) {}
+        } finally {
+          client?.close(force: true);
+        }
+      });
+    }
+
+    final streamId =
+        '${DateTime.now().millisecondsSinceEpoch}-${_streamCounter++}';
+    _streams[streamId] = _ProxyTarget(
+      sourceUrl: sourceUrl,
+      contentType: contentType,
+    );
+    _trimOldStreams();
+
+    return 'http://127.0.0.1:${_server!.port}/$streamId.$extension';
+  }
+
+  static void _trimOldStreams() {
+    while (_streams.length > 8) {
+      _streams.remove(_streams.keys.first);
+    }
+  }
+}
+
+class _ProxyTarget {
+  final String sourceUrl;
+  final String contentType;
+
+  const _ProxyTarget({required this.sourceUrl, required this.contentType});
 }
