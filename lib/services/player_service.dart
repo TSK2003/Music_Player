@@ -1,9 +1,11 @@
+import 'dart:async';
 import 'dart:math';
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/material.dart';
 import 'package:rxdart/rxdart.dart';
 import '../models/song_model.dart';
 import 'audio_handler.dart';
+import 'youtube_service.dart';
 
 /// Simplified position data combining position, buffered position, and duration
 class PositionData {
@@ -24,13 +26,19 @@ class PlayerService extends ChangeNotifier {
   bool _isLoading = false;
   String? _error;
   bool _isInitialized = false;
+  late final StreamSubscription<Object?> _playbackErrorSubscription;
+  bool _handlingPlaybackError = false;
 
   // Shuffle & Repeat state
   bool _shuffleEnabled = false;
   LoopMode _loopMode = LoopMode.off;
   List<int>? _shuffleOrder;
 
-  PlayerService(this.audioHandler);
+  PlayerService(this.audioHandler) {
+    _playbackErrorSubscription = audioHandler.player.errorStream.listen(
+      _handlePlaybackError,
+    );
+  }
 
   // Getters
   List<SongModel> get songs => _songs;
@@ -44,15 +52,14 @@ class PlayerService extends ChangeNotifier {
   bool get hasNext => _currentPlaylist.isNotEmpty;
 
   /// Stream of playing state
-  Stream<bool> get playingStream => audioHandler.playbackState
-      .map((state) => state.playing)
-      .distinct();
+  Stream<bool> get playingStream =>
+      audioHandler.playbackState.map((state) => state.playing).distinct();
 
   /// Stream of processing state
-  Stream<AudioProcessingState> get processingStateStream =>
-      audioHandler.playbackState
-          .map((state) => state.processingState)
-          .distinct();
+  Stream<AudioProcessingState> get processingStateStream => audioHandler
+      .playbackState
+      .map((state) => state.processingState)
+      .distinct();
 
   /// Combined position stream
   Stream<PositionData> get positionDataStream =>
@@ -61,14 +68,9 @@ class PlayerService extends ChangeNotifier {
         audioHandler.playbackState
             .map((state) => state.bufferedPosition)
             .distinct(),
-        audioHandler.mediaItem
-            .map((item) => item?.duration)
-            .distinct(),
-        (position, bufferedPosition, duration) => PositionData(
-          position,
-          bufferedPosition,
-          duration ?? Duration.zero,
-        ),
+        audioHandler.mediaItem.map((item) => item?.duration).distinct(),
+        (position, bufferedPosition, duration) =>
+            PositionData(position, bufferedPosition, duration ?? Duration.zero),
       );
 
   /// Current media item stream
@@ -90,9 +92,115 @@ class PlayerService extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Play a song — loads single song, keeps playlist reference for next/prev
+  MediaItem _mediaItemFor(SongModel song) {
+    return MediaItem(
+      id: song.streamUrl,
+      album: song.isLocal
+          ? 'Local Music'
+          : (song.isYouTube ? 'YouTube' : 'Music Player'),
+      title: song.title,
+      artist: song.artist,
+      artUri: song.thumbnailUrl != null
+          ? Uri.tryParse(song.thumbnailUrl!)
+          : null,
+      extras: {'songId': song.id, 'isLocal': song.isLocal},
+    );
+  }
+
+  void _replaceSong(SongModel song) {
+    final songIndex = _songs.indexWhere((s) => s.id == song.id);
+    if (songIndex == -1) {
+      _songs.add(song);
+    } else {
+      _songs[songIndex] = song;
+    }
+
+    final playlistIndex = _currentPlaylist.indexWhere((s) => s.id == song.id);
+    if (playlistIndex == -1) {
+      _currentPlaylist = [song];
+      _currentIndex = 0;
+    } else {
+      _currentPlaylist[playlistIndex] = song;
+      _currentIndex = playlistIndex;
+    }
+  }
+
+  bool _isRemoteUrl(String value) =>
+      value.startsWith('http://') || value.startsWith('https://');
+
+  Future<bool> _tryCachedYouTubeFallback(
+    SongModel song,
+    int loadId,
+    Object directError,
+  ) async {
+    if (!song.isYouTube || !_isRemoteUrl(song.streamUrl)) return false;
+
+    debugPrint(
+      '[PlayerService] Direct YouTube stream failed, caching fallback: '
+      '$directError',
+    );
+
+    try {
+      final cachedSong = await YouTubeService.cacheForPlayback(song);
+      if (_loadId != loadId) return true;
+
+      _replaceSong(cachedSong);
+      _currentSong = cachedSong;
+      _error = null;
+
+      await audioHandler.loadSingle(_mediaItemFor(cachedSong));
+      if (_loadId != loadId) return true;
+
+      await audioHandler.play();
+      return true;
+    } catch (fallbackError) {
+      debugPrint(
+        '[PlayerService] Cached YouTube fallback failed: $fallbackError',
+      );
+      return false;
+    }
+  }
+
+  /// Handles playback errors that arrive after setAudioSource has succeeded.
+  Future<void> _handlePlaybackError(Object playbackError) async {
+    if (_handlingPlaybackError || _isLoading) return;
+
+    final song = _currentSong;
+    if (song == null || !song.isYouTube || !_isRemoteUrl(song.streamUrl)) {
+      return;
+    }
+
+    final currentLoadId = _loadId;
+    _handlingPlaybackError = true;
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
+
+    try {
+      final handled = await _tryCachedYouTubeFallback(
+        song,
+        currentLoadId,
+        playbackError,
+      );
+
+      if (!handled && _loadId == currentLoadId) {
+        _error = 'Failed to play: ${playbackError.toString()}';
+        _currentSong = null;
+        _currentIndex = -1;
+        debugPrint('[PlayerService] Error: $_error');
+      }
+    } finally {
+      _handlingPlaybackError = false;
+      if (_loadId == currentLoadId) {
+        _isLoading = false;
+        notifyListeners();
+      }
+    }
+  }
+
   int _loadId = 0;
 
+  /// Play a song - loads single song, keeps playlist reference for next/prev
   Future<void> playSong(SongModel song, {List<SongModel>? playlist}) async {
     final currentLoadId = ++_loadId;
     _isLoading = true;
@@ -108,7 +216,7 @@ class PlayerService extends ChangeNotifier {
 
       _currentSong = song;
       _currentIndex = _currentPlaylist.indexWhere((s) => s.id == song.id);
-      
+
       if (_currentIndex == -1) {
         _currentIndex = 0;
       }
@@ -118,29 +226,25 @@ class PlayerService extends ChangeNotifier {
         _buildShuffleOrder();
       }
 
-      final mediaItem = MediaItem(
-        id: song.streamUrl,
-        album: song.isLocal ? 'Local Music' : (song.isYouTube ? 'YouTube' : 'Music Player'),
-        title: song.title,
-        artist: song.artist,
-        artUri: song.thumbnailUrl != null ? Uri.tryParse(song.thumbnailUrl!) : null,
-        extras: {
-          'songId': song.id,
-          'isLocal': song.isLocal,
-        },
-      );
+      final mediaItem = _mediaItemFor(song);
 
       // If a new song was selected while we were prepping this one, abort.
       if (_loadId != currentLoadId) return;
 
       await audioHandler.loadSingle(mediaItem);
-      
+
       if (_loadId != currentLoadId) return;
-      
+
       await audioHandler.play();
     } catch (e) {
       if (_loadId == currentLoadId) {
+        if (await _tryCachedYouTubeFallback(song, currentLoadId, e)) {
+          return;
+        }
+
         _error = 'Failed to play: ${e.toString()}';
+        _currentSong = null;
+        _currentIndex = -1;
         debugPrint('[PlayerService] Error: $_error');
       }
     } finally {
@@ -149,7 +253,9 @@ class PlayerService extends ChangeNotifier {
         notifyListeners();
       }
     }
-  }  /// Toggle play/pause
+  }
+
+  /// Toggle play/pause
   Future<void> togglePlayPause() async {
     if (audioHandler.player.playing) {
       await audioHandler.pause();
@@ -162,6 +268,7 @@ class PlayerService extends ChangeNotifier {
   Future<void> pause() async {
     await audioHandler.pause();
   }
+
   /// Seek to position
   Future<void> seekTo(Duration position) async {
     await audioHandler.seek(position);
@@ -215,7 +322,8 @@ class PlayerService extends ChangeNotifier {
       prevIndex = _shuffleOrder![prevShufflePos];
     } else {
       prevIndex =
-          (_currentIndex - 1 + _currentPlaylist.length) % _currentPlaylist.length;
+          (_currentIndex - 1 + _currentPlaylist.length) %
+          _currentPlaylist.length;
     }
 
     _currentIndex = prevIndex;
@@ -269,6 +377,7 @@ class PlayerService extends ChangeNotifier {
 
   @override
   void dispose() {
+    _playbackErrorSubscription.cancel();
     audioHandler.stop();
     super.dispose();
   }

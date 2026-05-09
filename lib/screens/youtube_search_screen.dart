@@ -28,6 +28,9 @@ class _YouTubeSearchScreenState extends State<YouTubeSearchScreen>
   bool _isSearching = false;
   bool _isLoadingTrending = true;
   String? _extractingId;
+  int _playRequestId = 0;
+  int _searchRequestId = 0;
+  String? _activeSearchQuery;
   String? _error;
   Timer? _debounce;
 
@@ -53,6 +56,8 @@ class _YouTubeSearchScreenState extends State<YouTubeSearchScreen>
 
   @override
   void dispose() {
+    _playRequestId++;
+    _searchRequestId++;
     _searchController.dispose();
     _searchFocusNode.dispose();
     _debounce?.cancel();
@@ -83,6 +88,7 @@ class _YouTubeSearchScreenState extends State<YouTubeSearchScreen>
       setState(() {
         _results = [];
         _error = null;
+        _activeSearchQuery = null;
       });
       return;
     }
@@ -98,6 +104,10 @@ class _YouTubeSearchScreenState extends State<YouTubeSearchScreen>
 
   Future<void> _performSearch(String query) async {
     if (query.isEmpty) return;
+    if (_isSearching && _activeSearchQuery == query) return;
+
+    final requestId = ++_searchRequestId;
+    _activeSearchQuery = query;
 
     setState(() {
       _isSearching = true;
@@ -106,14 +116,18 @@ class _YouTubeSearchScreenState extends State<YouTubeSearchScreen>
 
     try {
       // Check if it's a YouTube URL
-      if (query.startsWith('http') && (query.contains('youtube.com') || query.contains('youtu.be'))) {
+      if (query.startsWith('http') &&
+          (query.contains('youtube.com') || query.contains('youtu.be'))) {
         setState(() {
           _extractingId = 'url';
         });
 
         final song = await YouTubeService.extractFromUrl(query);
         if (mounted) {
-          final playerService = Provider.of<PlayerService>(context, listen: false);
+          final playerService = Provider.of<PlayerService>(
+            context,
+            listen: false,
+          );
           playerService.addSongs([song]);
           await playerService.playSong(song);
           _searchController.clear();
@@ -125,15 +139,15 @@ class _YouTubeSearchScreenState extends State<YouTubeSearchScreen>
         return;
       }
 
-      final results = await YouTubeService.search(query);
-      if (mounted) {
+      final results = await YouTubeService.search(query, maxResults: 60);
+      if (mounted && requestId == _searchRequestId) {
         setState(() {
           _results = results;
           _isSearching = false;
         });
       }
     } catch (e) {
-      if (mounted) {
+      if (mounted && requestId == _searchRequestId) {
         setState(() {
           _isSearching = false;
           _extractingId = null;
@@ -144,31 +158,44 @@ class _YouTubeSearchScreenState extends State<YouTubeSearchScreen>
   }
 
   Future<void> _playYouTubeResult(YouTubeResult result) async {
-    if (_extractingId != null) return; // Prevent concurrent downloads
+    final requestId = ++_playRequestId;
 
     setState(() {
       _extractingId = result.videoId;
     });
 
     try {
-      final song = await YouTubeService.extractAudio(result);
-      if (mounted) {
-        final playerService = Provider.of<PlayerService>(context, listen: false);
-        playerService.addSongs([song]);
-        await playerService.playSong(song);
+      final song = await YouTubeService.extractAudio(
+        result,
+        shouldCancel: () => requestId != _playRequestId,
+      );
+      if (!mounted || requestId != _playRequestId) return;
+
+      final playerService = Provider.of<PlayerService>(context, listen: false);
+      playerService.addSongs([song]);
+      await playerService.playSong(song);
+
+      if (mounted && requestId == _playRequestId) {
         setState(() {
           _extractingId = null;
         });
       }
     } catch (e) {
-      if (mounted) {
+      if (YouTubeService.isPlaybackCancelled(e)) return;
+      if (mounted && requestId == _playRequestId) {
         setState(() => _extractingId = null);
+        final errorText = e.toString();
+        final message = errorText.contains('Sign in to confirm')
+            ? 'YouTube blocked this video. Try another result.'
+            : 'Play failed: ${errorText.split('\n').first}';
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Play failed: ${e.toString().split('\n').first}'),
+            content: Text(message),
             backgroundColor: AppColors.accentPink.withValues(alpha: 0.9),
             behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
           ),
         );
       }
@@ -194,7 +221,9 @@ class _YouTubeSearchScreenState extends State<YouTubeSearchScreen>
             content: Text('Downloaded "${result.title}" ✓'),
             backgroundColor: Colors.green.withValues(alpha: 0.9),
             behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
           ),
         );
       }
@@ -205,7 +234,9 @@ class _YouTubeSearchScreenState extends State<YouTubeSearchScreen>
             content: Text('Download failed: ${e.toString().split('\n').first}'),
             backgroundColor: AppColors.accentPink.withValues(alpha: 0.9),
             behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
           ),
         );
       }
@@ -238,7 +269,9 @@ class _YouTubeSearchScreenState extends State<YouTubeSearchScreen>
 
   Future<void> _batchDownload() async {
     final list = _results.isNotEmpty ? _results : _trendingResults;
-    final toDownload = list.where((r) => _selectedIds.contains(r.videoId)).toList();
+    final toDownload = list
+        .where((r) => _selectedIds.contains(r.videoId))
+        .toList();
     if (toDownload.isEmpty) return;
 
     setState(() {
@@ -270,10 +303,14 @@ class _YouTubeSearchScreenState extends State<YouTubeSearchScreen>
       });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Downloaded $success songs${failed > 0 ? ' ($failed failed)' : ''} ✓'),
+          content: Text(
+            'Downloaded $success songs${failed > 0 ? ' ($failed failed)' : ''} ✓',
+          ),
           backgroundColor: Colors.green.withValues(alpha: 0.9),
           behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
         ),
       );
     }
@@ -289,17 +326,14 @@ class _YouTubeSearchScreenState extends State<YouTubeSearchScreen>
         },
         transitionsBuilder: (context, animation, secondaryAnimation, child) {
           return SlideTransition(
-            position: Tween<Offset>(
-              begin: const Offset(0, 1),
-              end: Offset.zero,
-            ).animate(CurvedAnimation(
-              parent: animation,
-              curve: Curves.easeOutCubic,
-            )),
-            child: FadeTransition(
-              opacity: animation,
-              child: child,
-            ),
+            position: Tween<Offset>(begin: const Offset(0, 1), end: Offset.zero)
+                .animate(
+                  CurvedAnimation(
+                    parent: animation,
+                    curve: Curves.easeOutCubic,
+                  ),
+                ),
+            child: FadeTransition(opacity: animation, child: child),
           );
         },
       ),
@@ -348,9 +382,7 @@ class _YouTubeSearchScreenState extends State<YouTubeSearchScreen>
                       ),
                     ),
                   // Results
-                  Expanded(
-                    child: _buildContent(isDark, currentSong),
-                  ),
+                  Expanded(child: _buildContent(isDark, currentSong)),
                   // Bottom spacing for mini player
                   SizedBox(height: currentSong != null ? 88 : 0),
                 ],
@@ -389,7 +421,9 @@ class _YouTubeSearchScreenState extends State<YouTubeSearchScreen>
                       ? Colors.white.withValues(alpha: 0.08)
                       : Colors.black.withValues(alpha: 0.05),
                   border: Border.all(
-                    color: isDark ? AppColors.glassBorder : AppColors.lightGlassBorder,
+                    color: isDark
+                        ? AppColors.glassBorder
+                        : AppColors.lightGlassBorder,
                     width: 1,
                   ),
                 ),
@@ -434,18 +468,20 @@ class _YouTubeSearchScreenState extends State<YouTubeSearchScreen>
                   child: Text(
                     'YouTube Music',
                     style: Theme.of(context).textTheme.displayMedium?.copyWith(
-                          color: Colors.white,
-                          fontSize: 20,
-                        ),
+                      color: Colors.white,
+                      fontSize: 20,
+                    ),
                   ),
                 ),
                 Text(
                   'Search & stream ad-free',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: isDark ? AppColors.textMuted : AppColors.lightTextMuted,
-                        letterSpacing: 0.5,
-                        fontSize: 10,
-                      ),
+                    color: isDark
+                        ? AppColors.textMuted
+                        : AppColors.lightTextMuted,
+                    letterSpacing: 0.5,
+                    fontSize: 10,
+                  ),
                 ),
               ],
             ),
@@ -472,7 +508,9 @@ class _YouTubeSearchScreenState extends State<YouTubeSearchScreen>
                     ? Colors.white.withValues(alpha: 0.06)
                     : Colors.white.withValues(alpha: 0.6),
                 border: Border.all(
-                  color: isDark ? AppColors.glassBorder : AppColors.lightGlassBorder,
+                  color: isDark
+                      ? AppColors.glassBorder
+                      : AppColors.lightGlassBorder,
                   width: 1,
                 ),
               ),
@@ -482,13 +520,17 @@ class _YouTubeSearchScreenState extends State<YouTubeSearchScreen>
                 onChanged: _onSearchChanged,
                 onSubmitted: (query) => _performSearch(query.trim()),
                 style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                      color: isDark ? AppColors.textPrimary : AppColors.lightTextPrimary,
-                    ),
+                  color: isDark
+                      ? AppColors.textPrimary
+                      : AppColors.lightTextPrimary,
+                ),
                 decoration: InputDecoration(
                   hintText: 'Search songs or paste YouTube URL...',
                   hintStyle: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                        color: isDark ? AppColors.textMuted : AppColors.lightTextMuted,
-                      ),
+                    color: isDark
+                        ? AppColors.textMuted
+                        : AppColors.lightTextMuted,
+                  ),
                   prefixIcon: _isSearching
                       ? Padding(
                           padding: const EdgeInsets.all(14),
@@ -497,13 +539,17 @@ class _YouTubeSearchScreenState extends State<YouTubeSearchScreen>
                             height: 22,
                             child: CircularProgressIndicator(
                               strokeWidth: 2,
-                              color: isDark ? AppColors.textMuted : AppColors.lightTextSecondary,
+                              color: isDark
+                                  ? AppColors.textMuted
+                                  : AppColors.lightTextSecondary,
                             ),
                           ),
                         )
                       : Icon(
                           Icons.search_rounded,
-                          color: isDark ? AppColors.textMuted : AppColors.lightTextSecondary,
+                          color: isDark
+                              ? AppColors.textMuted
+                              : AppColors.lightTextSecondary,
                           size: 22,
                         ),
                   suffixIcon: _searchController.text.isNotEmpty
@@ -517,7 +563,9 @@ class _YouTubeSearchScreenState extends State<YouTubeSearchScreen>
                           },
                           child: Icon(
                             Icons.close_rounded,
-                            color: isDark ? AppColors.textMuted : AppColors.lightTextSecondary,
+                            color: isDark
+                                ? AppColors.textMuted
+                                : AppColors.lightTextSecondary,
                             size: 20,
                           ),
                         )
@@ -550,10 +598,10 @@ class _YouTubeSearchScreenState extends State<YouTubeSearchScreen>
           Text(
             'Tip: Paste a YouTube URL to play instantly',
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: isDark ? AppColors.textMuted : AppColors.lightTextMuted,
-                  fontSize: 11,
-                  fontStyle: FontStyle.italic,
-                ),
+              color: isDark ? AppColors.textMuted : AppColors.lightTextMuted,
+              fontSize: 11,
+              fontStyle: FontStyle.italic,
+            ),
           ),
         ],
       ),
@@ -585,7 +633,9 @@ class _YouTubeSearchScreenState extends State<YouTubeSearchScreen>
               mainAxisSize: MainAxisSize.min,
               children: [
                 Icon(
-                  allSelected ? Icons.deselect_rounded : Icons.select_all_rounded,
+                  allSelected
+                      ? Icons.deselect_rounded
+                      : Icons.select_all_rounded,
                   size: 18,
                   color: const Color(0xFFFF4444),
                 ),
@@ -593,10 +643,10 @@ class _YouTubeSearchScreenState extends State<YouTubeSearchScreen>
                 Text(
                   allSelected ? 'Deselect All' : 'Select All',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: const Color(0xFFFF4444),
-                        fontWeight: FontWeight.w600,
-                        fontSize: 12,
-                      ),
+                    color: const Color(0xFFFF4444),
+                    fontWeight: FontWeight.w600,
+                    fontSize: 12,
+                  ),
                 ),
               ],
             ),
@@ -606,9 +656,9 @@ class _YouTubeSearchScreenState extends State<YouTubeSearchScreen>
           Text(
             '${_selectedIds.length} selected',
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: isDark ? AppColors.textMuted : AppColors.lightTextMuted,
-                  fontSize: 11,
-                ),
+              color: isDark ? AppColors.textMuted : AppColors.lightTextMuted,
+              fontSize: 11,
+            ),
           ),
           const SizedBox(width: 8),
           // Download button
@@ -616,7 +666,10 @@ class _YouTubeSearchScreenState extends State<YouTubeSearchScreen>
             GestureDetector(
               onTap: _selectedIds.isNotEmpty ? _batchDownload : null,
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 6,
+                ),
                 decoration: BoxDecoration(
                   color: _selectedIds.isNotEmpty
                       ? const Color(0xFFFF4444)
@@ -626,15 +679,19 @@ class _YouTubeSearchScreenState extends State<YouTubeSearchScreen>
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Icon(Icons.download_rounded, size: 14, color: Colors.white),
+                    const Icon(
+                      Icons.download_rounded,
+                      size: 14,
+                      color: Colors.white,
+                    ),
                     const SizedBox(width: 4),
                     Text(
                       'Download',
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w600,
-                            fontSize: 11,
-                          ),
+                        color: Colors.white,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 11,
+                      ),
                     ),
                   ],
                 ),
@@ -644,9 +701,9 @@ class _YouTubeSearchScreenState extends State<YouTubeSearchScreen>
             Text(
               '$_batchDone / $_batchTotal',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: const Color(0xFFFF4444),
-                    fontWeight: FontWeight.w600,
-                  ),
+                color: const Color(0xFFFF4444),
+                fontWeight: FontWeight.w600,
+              ),
             ),
           const SizedBox(width: 8),
           // Cancel
@@ -701,8 +758,8 @@ class _YouTubeSearchScreenState extends State<YouTubeSearchScreen>
             Text(
               'Loading trending songs...',
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: isDark ? AppColors.textMuted : AppColors.lightTextMuted,
-                  ),
+                color: isDark ? AppColors.textMuted : AppColors.lightTextMuted,
+              ),
             ),
           ],
         ),
@@ -741,9 +798,9 @@ class _YouTubeSearchScreenState extends State<YouTubeSearchScreen>
                 Text(
                   'Trending Now',
                   style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                      ),
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
                 const Spacer(),
                 // Select button
@@ -755,14 +812,19 @@ class _YouTubeSearchScreenState extends State<YouTubeSearchScreen>
                         setState(() => _selectionMode = true);
                       },
                       child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 5,
+                        ),
                         decoration: BoxDecoration(
                           color: isDark
                               ? Colors.white.withValues(alpha: 0.06)
                               : Colors.black.withValues(alpha: 0.04),
                           borderRadius: BorderRadius.circular(8),
                           border: Border.all(
-                            color: isDark ? AppColors.glassBorder : AppColors.lightGlassBorder,
+                            color: isDark
+                                ? AppColors.glassBorder
+                                : AppColors.lightGlassBorder,
                           ),
                         ),
                         child: Row(
@@ -771,14 +833,19 @@ class _YouTubeSearchScreenState extends State<YouTubeSearchScreen>
                             Icon(
                               Icons.checklist_rounded,
                               size: 14,
-                              color: isDark ? AppColors.textMuted : AppColors.lightTextMuted,
+                              color: isDark
+                                  ? AppColors.textMuted
+                                  : AppColors.lightTextMuted,
                             ),
                             const SizedBox(width: 4),
                             Text(
                               'Select',
-                              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              style: Theme.of(context).textTheme.bodySmall
+                                  ?.copyWith(
                                     fontSize: 11,
-                                    color: isDark ? AppColors.textMuted : AppColors.lightTextMuted,
+                                    color: isDark
+                                        ? AppColors.textMuted
+                                        : AppColors.lightTextMuted,
                                   ),
                             ),
                           ],
@@ -789,14 +856,19 @@ class _YouTubeSearchScreenState extends State<YouTubeSearchScreen>
                 GestureDetector(
                   onTap: _loadTrending,
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 5,
+                    ),
                     decoration: BoxDecoration(
                       color: isDark
                           ? Colors.white.withValues(alpha: 0.06)
                           : Colors.black.withValues(alpha: 0.04),
                       borderRadius: BorderRadius.circular(8),
                       border: Border.all(
-                        color: isDark ? AppColors.glassBorder : AppColors.lightGlassBorder,
+                        color: isDark
+                            ? AppColors.glassBorder
+                            : AppColors.lightGlassBorder,
                       ),
                     ),
                     child: Row(
@@ -805,14 +877,19 @@ class _YouTubeSearchScreenState extends State<YouTubeSearchScreen>
                         Icon(
                           Icons.refresh_rounded,
                           size: 14,
-                          color: isDark ? AppColors.textMuted : AppColors.lightTextMuted,
+                          color: isDark
+                              ? AppColors.textMuted
+                              : AppColors.lightTextMuted,
                         ),
                         const SizedBox(width: 4),
                         Text(
                           'Refresh',
-                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(
                                 fontSize: 11,
-                                color: isDark ? AppColors.textMuted : AppColors.lightTextMuted,
+                                color: isDark
+                                    ? AppColors.textMuted
+                                    : AppColors.lightTextMuted,
                               ),
                         ),
                       ],
@@ -879,16 +956,16 @@ class _YouTubeSearchScreenState extends State<YouTubeSearchScreen>
             const SizedBox(height: 20),
             Text(
               'Search YouTube',
-              style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                    fontSize: 18,
-                  ),
+              style: Theme.of(
+                context,
+              ).textTheme.titleLarge?.copyWith(fontSize: 18),
             ),
             const SizedBox(height: 8),
             Text(
               'Find any song and play it ad-free',
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: isDark ? AppColors.textMuted : AppColors.lightTextMuted,
-                  ),
+                color: isDark ? AppColors.textMuted : AppColors.lightTextMuted,
+              ),
             ),
           ],
         ),
@@ -913,8 +990,8 @@ class _YouTubeSearchScreenState extends State<YouTubeSearchScreen>
           Text(
             'Searching YouTube...',
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: isDark ? AppColors.textMuted : AppColors.lightTextMuted,
-                ),
+              color: isDark ? AppColors.textMuted : AppColors.lightTextMuted,
+            ),
           ),
         ],
       ),
@@ -951,7 +1028,10 @@ class _YouTubeSearchScreenState extends State<YouTubeSearchScreen>
                 _performSearch(_searchController.text.trim());
               },
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 24,
+                  vertical: 12,
+                ),
                 decoration: BoxDecoration(
                   gradient: const LinearGradient(
                     colors: [Color(0xFFFF4444), Color(0xFFFF0000)],
@@ -960,9 +1040,9 @@ class _YouTubeSearchScreenState extends State<YouTubeSearchScreen>
                 ),
                 child: Text(
                   'Retry',
-                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                        color: Colors.white,
-                      ),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.labelLarge?.copyWith(color: Colors.white),
                 ),
               ),
             ),
@@ -1001,9 +1081,11 @@ class _YouTubeSearchScreenState extends State<YouTubeSearchScreen>
                 Text(
                   '${_results.length} Results',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: isDark ? AppColors.textMuted : AppColors.lightTextSecondary,
-                        letterSpacing: 0.5,
-                      ),
+                    color: isDark
+                        ? AppColors.textMuted
+                        : AppColors.lightTextSecondary,
+                    letterSpacing: 0.5,
+                  ),
                 ),
                 if (_isSearching) ...[
                   const SizedBox(width: 8),
@@ -1012,7 +1094,9 @@ class _YouTubeSearchScreenState extends State<YouTubeSearchScreen>
                     height: 12,
                     child: CircularProgressIndicator(
                       strokeWidth: 1.5,
-                      color: isDark ? AppColors.textMuted : AppColors.lightTextSecondary,
+                      color: isDark
+                          ? AppColors.textMuted
+                          : AppColors.lightTextSecondary,
                     ),
                   ),
                 ],
@@ -1082,21 +1166,21 @@ class _YouTubeResultCard extends StatelessWidget {
           borderRadius: BorderRadius.circular(16),
           color: isSelected
               ? (isDark
-                  ? const Color(0xFFFF4444).withValues(alpha: 0.12)
-                  : const Color(0xFFFF4444).withValues(alpha: 0.08))
+                    ? const Color(0xFFFF4444).withValues(alpha: 0.12)
+                    : const Color(0xFFFF4444).withValues(alpha: 0.08))
               : isPlaying
-                  ? (isDark
-                      ? const Color(0xFFFF0000).withValues(alpha: 0.08)
-                      : const Color(0xFFFF0000).withValues(alpha: 0.05))
-                  : (isDark
-                      ? Colors.white.withValues(alpha: 0.04)
-                      : Colors.white.withValues(alpha: 0.5)),
+              ? (isDark
+                    ? const Color(0xFFFF0000).withValues(alpha: 0.08)
+                    : const Color(0xFFFF0000).withValues(alpha: 0.05))
+              : (isDark
+                    ? Colors.white.withValues(alpha: 0.04)
+                    : Colors.white.withValues(alpha: 0.5)),
           border: Border.all(
             color: isSelected
                 ? const Color(0xFFFF4444).withValues(alpha: 0.5)
                 : isPlaying
-                    ? const Color(0xFFFF4444).withValues(alpha: 0.3)
-                    : (isDark ? AppColors.glassBorder : AppColors.lightGlassBorder),
+                ? const Color(0xFFFF4444).withValues(alpha: 0.3)
+                : (isDark ? AppColors.glassBorder : AppColors.lightGlassBorder),
             width: isSelected ? 1.5 : 1,
           ),
           boxShadow: isPlaying
@@ -1127,7 +1211,9 @@ class _YouTubeResultCard extends StatelessWidget {
                     border: Border.all(
                       color: isSelected
                           ? const Color(0xFFFF4444)
-                          : (isDark ? AppColors.textMuted : AppColors.lightTextMuted),
+                          : (isDark
+                                ? AppColors.textMuted
+                                : AppColors.lightTextMuted),
                       width: 2,
                     ),
                   ),
@@ -1147,12 +1233,14 @@ class _YouTubeResultCard extends StatelessWidget {
                   Text(
                     result.title,
                     style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          color: isPlaying
-                              ? const Color(0xFFFF4444)
-                              : (isDark ? AppColors.textPrimary : AppColors.lightTextPrimary),
-                          fontWeight: isPlaying ? FontWeight.w600 : FontWeight.w500,
-                          fontSize: 14,
-                        ),
+                      color: isPlaying
+                          ? const Color(0xFFFF4444)
+                          : (isDark
+                                ? AppColors.textPrimary
+                                : AppColors.lightTextPrimary),
+                      fontWeight: isPlaying ? FontWeight.w600 : FontWeight.w500,
+                      fontSize: 14,
+                    ),
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -1162,10 +1250,15 @@ class _YouTubeResultCard extends StatelessWidget {
                       Flexible(
                         child: Text(
                           result.author,
-                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(
                                 color: isPlaying
-                                    ? const Color(0xFFFF4444).withValues(alpha: 0.7)
-                                    : (isDark ? AppColors.textSecondary : AppColors.lightTextSecondary),
+                                    ? const Color(
+                                        0xFFFF4444,
+                                      ).withValues(alpha: 0.7)
+                                    : (isDark
+                                          ? AppColors.textSecondary
+                                          : AppColors.lightTextSecondary),
                                 fontSize: 12,
                               ),
                           maxLines: 1,
@@ -1175,7 +1268,10 @@ class _YouTubeResultCard extends StatelessWidget {
                       if (result.durationText.isNotEmpty) ...[
                         const SizedBox(width: 8),
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
                           decoration: BoxDecoration(
                             color: isDark
                                 ? Colors.white.withValues(alpha: 0.06)
@@ -1184,10 +1280,37 @@ class _YouTubeResultCard extends StatelessWidget {
                           ),
                           child: Text(
                             result.durationText,
-                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            style: Theme.of(context).textTheme.bodySmall
+                                ?.copyWith(
                                   fontSize: 10,
                                   fontWeight: FontWeight.w500,
-                                  color: isDark ? AppColors.textMuted : AppColors.lightTextMuted,
+                                  color: isDark
+                                      ? AppColors.textMuted
+                                      : AppColors.lightTextMuted,
+                                ),
+                          ),
+                        ),
+                      ],
+                      if (result.isPodcast) ...[
+                        const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: const Color(
+                              0xFFFF4444,
+                            ).withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            'Podcast',
+                            style: Theme.of(context).textTheme.bodySmall
+                                ?.copyWith(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w600,
+                                  color: const Color(0xFFFF4444),
                                 ),
                           ),
                         ),
@@ -1213,7 +1336,9 @@ class _YouTubeResultCard extends StatelessWidget {
                   ),
                   child: Icon(
                     Icons.download_rounded,
-                    color: isDark ? AppColors.textMuted : AppColors.lightTextMuted,
+                    color: isDark
+                        ? AppColors.textMuted
+                        : AppColors.lightTextMuted,
                     size: 16,
                   ),
                 ),

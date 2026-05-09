@@ -2,10 +2,21 @@ import 'package:audio_service/audio_service.dart';
 import 'package:flutter/foundation.dart';
 import 'package:just_audio/just_audio.dart';
 
+const _desktopUserAgent =
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36';
+const _androidUserAgent =
+    'com.google.android.youtube/20.10.38 (Linux; U; Android 11) gzip';
+const _androidMusicUserAgent =
+    'com.google.android.youtube/19.29.1 (Linux; U; Android 11) gzip';
+const _iosUserAgent =
+    'com.google.ios.youtube/20.10.4 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X;)';
+const _safariUserAgent =
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.5 Safari/605.1.15';
+
 class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
   final AudioPlayer _player = AudioPlayer(
-    userAgent:
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36',
+    userAgent: _desktopUserAgent,
+    useProxyForRequestHeaders: false,
     audioLoadConfiguration: const AudioLoadConfiguration(
       androidLoadControl: AndroidLoadControl(
         prioritizeTimeOverSizeThresholds: true,
@@ -48,6 +59,33 @@ class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
   }
 
   AudioPlayer get player => _player;
+
+  Map<String, String> _headersForUri(Uri uri) {
+    final host = uri.host.toLowerCase();
+    if (host == '127.0.0.1' || host == 'localhost') {
+      return const {};
+    }
+
+    if (!host.endsWith('googlevideo.com')) {
+      return const {'User-Agent': _desktopUserAgent, 'Accept': '*/*'};
+    }
+
+    final client = uri.queryParameters['c']?.toUpperCase();
+    final userAgent = switch (client) {
+      'ANDROID' => _androidUserAgent,
+      'ANDROID_MUSIC' => _androidMusicUserAgent,
+      'IOS' => _iosUserAgent,
+      'WEB' => _safariUserAgent,
+      _ => _desktopUserAgent,
+    };
+
+    return {
+      'User-Agent': userAgent,
+      'Accept': '*/*',
+      'Referer': 'https://www.youtube.com/',
+      'Origin': 'https://www.youtube.com',
+    };
+  }
 
   String _redactedUriForLog(String value) {
     final uri = Uri.tryParse(value);
@@ -110,9 +148,10 @@ class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
       await _player.stop();
 
       if (uri.startsWith('http://') || uri.startsWith('https://')) {
+        final parsedUri = Uri.parse(uri);
         debugPrint('[AudioHandler] Loading URL: ${_redactedUriForLog(uri)}');
         await _player.setAudioSource(
-          AudioSource.uri(Uri.parse(uri)),
+          AudioSource.uri(parsedUri, headers: _headersForUri(parsedUri)),
           preload: true,
         );
       } else {

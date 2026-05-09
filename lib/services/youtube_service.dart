@@ -1,6 +1,6 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 import '../models/song_model.dart';
@@ -12,6 +12,7 @@ class YouTubeResult {
   final String author;
   final Duration? duration;
   final String thumbnailUrl;
+  final bool isPodcast;
 
   const YouTubeResult({
     required this.videoId,
@@ -19,6 +20,7 @@ class YouTubeResult {
     required this.author,
     this.duration,
     required this.thumbnailUrl,
+    this.isPodcast = false,
   });
 
   /// Format duration as mm:ss or h:mm:ss
@@ -34,9 +36,39 @@ class YouTubeResult {
   }
 }
 
+typedef PlaybackCancelCheck = bool Function();
+
 class YouTubeService {
+  static const _manifestTimeout = Duration(seconds: 20);
+  static const _downloadStallTimeout = Duration(seconds: 90);
+  static const _desktopUserAgent =
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36';
+  static const _androidUserAgent =
+      'com.google.android.youtube/20.10.38 (Linux; U; Android 11) gzip';
+  static const _androidMusicUserAgent =
+      'com.google.android.youtube/19.29.1 (Linux; U; Android 11) gzip';
+  static const _iosUserAgent =
+      'com.google.ios.youtube/20.10.4 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X;)';
+  static const _safariUserAgent =
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.5 Safari/605.1.15';
+  static final List<_DownloadClientAttempt> _downloadClientFallbacks = [
+    _DownloadClientAttempt('androidVr', [YoutubeApiClient.androidVr]),
+    _DownloadClientAttempt('android', [YoutubeApiClient.android]),
+    _DownloadClientAttempt('safari', [YoutubeApiClient.safari]),
+    _DownloadClientAttempt('ios', [YoutubeApiClient.ios]),
+    _DownloadClientAttempt('tv', [YoutubeApiClient.tv]),
+  ];
+  static final List<_DownloadClientAttempt> _playbackClientAttempts = [
+    _DownloadClientAttempt('ios', [YoutubeApiClient.ios]),
+    _DownloadClientAttempt('android', [YoutubeApiClient.android]),
+    _DownloadClientAttempt('androidMusic', [YoutubeApiClient.androidMusic]),
+    _DownloadClientAttempt('androidVr', [YoutubeApiClient.androidVr]),
+    _DownloadClientAttempt('safari', [YoutubeApiClient.safari]),
+    _DownloadClientAttempt('tv', [YoutubeApiClient.tv]),
+  ];
+
   static YoutubeExplode? _yt;
-  // Prevents concurrent downloads of the same video
+  // Prevents concurrent downloads of the same video into the same directory.
   static final Map<String, Future<String>> _activeDownloads = {};
   // Cache trending results to avoid re-fetching and rate limiting
   static List<YouTubeResult>? _trendingCache;
@@ -66,8 +98,28 @@ class YouTubeService {
     return true;
   }
 
+  static bool _isRateLimitError(Object error) {
+    final message = error.toString();
+    return message.contains('RequestLimitExceeded') ||
+        message.contains('rate limiting') ||
+        message.contains('Too many requests');
+  }
+
+  static bool isPlaybackCancelled(Object error) =>
+      error is YouTubePlaybackCancelledException;
+
+  static void _throwIfCancelled(PlaybackCancelCheck? shouldCancel) {
+    if (shouldCancel?.call() ?? false) {
+      throw const YouTubePlaybackCancelledException();
+    }
+  }
+
+  static String get _rateLimitMessage =>
+      'YouTube temporarily blocked requests from this network. '
+      'Please wait a few minutes and try again.';
+
   /// Mark rate limited for a duration
-  static void _markRateLimited({int seconds = 30}) {
+  static void _markRateLimited({int seconds = 120}) {
     _rateLimitedUntil = DateTime.now().add(Duration(seconds: seconds));
     debugPrint('[YouTubeService] ⚠ Rate limited. Cooldown for ${seconds}s');
   }
@@ -75,7 +127,8 @@ class YouTubeService {
   /// Search YouTube for videos matching the query.
   static Future<List<YouTubeResult>> search(
     String query, {
-    int maxResults = 20,
+    int maxResults = 60,
+    bool includePodcasts = true,
   }) async {
     // Don't search for very short queries — reduces unnecessary API calls
     if (query.trim().length < 3) {
@@ -85,18 +138,60 @@ class YouTubeService {
     // Respect rate limit cooldown
     if (_isRateLimited) {
       debugPrint('[YouTubeService] Skipping search — rate limited');
-      throw Exception(
-        'YouTube is temporarily rate limited. Please wait a moment and try again.',
-      );
+      throw Exception(_rateLimitMessage);
     }
 
     try {
       debugPrint('[YouTubeService] Searching: "$query"');
-      final searchResults = await _client.search.search(query);
-
       final results = <YouTubeResult>[];
-      for (final video in searchResults) {
+
+      final normalTarget = includePodcasts
+          ? (maxResults * 3 / 4).round()
+          : maxResults;
+      await _collectSearchVideos(
+        query: query,
+        results: results,
+        maxResults: normalTarget,
+      );
+
+      if (includePodcasts && results.length < maxResults) {
+        await _collectSearchVideos(
+          query: '$query podcast',
+          results: results,
+          maxResults: maxResults,
+          isPodcast: true,
+        );
+      }
+
+      debugPrint('[YouTubeService] Found ${results.length} results');
+      return results;
+    } catch (e) {
+      debugPrint('[YouTubeService] Search error: $e');
+      if (_isRateLimitError(e)) {
+        _markRateLimited();
+        _freshClient();
+      }
+      rethrow;
+    }
+  }
+
+  static Future<void> _collectSearchVideos({
+    required String query,
+    required List<YouTubeResult> results,
+    required int maxResults,
+    bool isPodcast = false,
+  }) async {
+    final seenIds = results.map((r) => r.videoId).toSet();
+    var page = await _client.search.search(query);
+    var pageCount = 0;
+
+    while (pageCount < 4 && results.length < maxResults) {
+      pageCount++;
+      for (final video in page) {
         if (results.length >= maxResults) break;
+        if (seenIds.contains(video.id.value)) continue;
+
+        seenIds.add(video.id.value);
         results.add(
           YouTubeResult(
             videoId: video.id.value,
@@ -104,18 +199,15 @@ class YouTubeService {
             author: video.author,
             duration: video.duration,
             thumbnailUrl: video.thumbnails.highResUrl,
+            isPodcast: isPodcast,
           ),
         );
       }
-      debugPrint('[YouTubeService] Found ${results.length} results');
-      return results;
-    } catch (e) {
-      debugPrint('[YouTubeService] Search error: $e');
-      if (e.toString().contains('RequestLimitExceeded')) {
-        _markRateLimited();
-        _freshClient();
-      }
-      rethrow;
+
+      if (results.length >= maxResults) break;
+      final next = await page.nextPage();
+      if (next == null) break;
+      page = next;
     }
   }
 
@@ -163,7 +255,7 @@ class YouTubeService {
         }
       } catch (e) {
         debugPrint('[YouTubeService] Trending query failed: $e');
-        if (e.toString().contains('RequestLimitExceeded')) {
+        if (_isRateLimitError(e)) {
           _markRateLimited();
           _freshClient();
           if (_trendingCache != null) return _trendingCache!;
@@ -286,27 +378,38 @@ class YouTubeService {
 
   /// Get the direct audio stream URL for a video — for INSTANT streaming playback.
   /// The player (just_audio + media_kit) handles buffering/streaming natively.
-  /// Includes retry with backoff for rate limiting.
   static Future<String> getStreamUrl(String videoId) async {
+    final resolved = await _resolvePlayableStream(videoId);
+    if (!Platform.isWindows) return resolved.url;
+
+    return YouTubeProxyServer.startProxy(
+      resolved.url,
+      contentType: resolved.contentType,
+      extension: resolved.extension,
+      headers: resolved.headers,
+      totalBytes: resolved.totalBytes,
+    );
+  }
+
+  /// Resolve a playable audio-only stream without downloading the track.
+  static Future<_ResolvedYouTubeStream> _resolvePlayableStream(
+    String videoId,
+  ) async {
     if (_isRateLimited) {
-      throw Exception(
-        'YouTube is temporarily rate limited. Please wait a moment and try again.',
-      );
+      throw Exception(_rateLimitMessage);
     }
 
-    for (int attempt = 0; attempt < 3; attempt++) {
-      try {
-        if (attempt > 0) {
-          final delay = Duration(seconds: 10 * attempt);
-          debugPrint(
-            '[YouTubeService] Retry $attempt after ${delay.inSeconds}s...',
-          );
-          await Future.delayed(delay);
-          _freshClient();
-        }
+    Object? lastError;
 
-        debugPrint('[YouTubeService] Getting stream URL for $videoId...');
-        final manifest = await _client.videos.streams.getManifest(videoId);
+    for (final attempt in _playbackClientAttempts) {
+      try {
+        debugPrint(
+          '[YouTubeService] Getting stream manifest for playback: '
+          '$videoId (${attempt.label})',
+        );
+        final manifest = await _client.videos.streams
+            .getManifest(videoId, ytClients: attempt.clients)
+            .timeout(_manifestTimeout);
         final audioStreams = manifest.audioOnly.toList();
 
         if (audioStreams.isEmpty) {
@@ -314,43 +417,75 @@ class YouTubeService {
         }
 
         final bestAudio = _selectBestStream(audioStreams);
-        final url = bestAudio.url.toString();
         debugPrint(
-          '[YouTubeService] ✓ Stream URL ready '
+          '[YouTubeService] Stream URL ready via ${attempt.label} '
           '(${bestAudio.bitrate.kiloBitsPerSecond.toStringAsFixed(0)} kbps)',
         );
 
-        final isWebm = bestAudio.container.name == 'webm';
-        final proxyUrl = await YouTubeProxyServer.startProxy(
-          url,
-          contentType: isWebm ? 'audio/webm' : 'audio/mp4',
-          extension: isWebm ? 'webm' : 'm4a',
+        return _ResolvedYouTubeStream(
+          url: bestAudio.url.toString(),
+          contentType: _contentTypeFor(bestAudio),
+          extension: bestAudio.container.name == 'webm' ? 'webm' : 'm4a',
+          headers: _headersForStreamUri(bestAudio.url),
+          totalBytes: bestAudio.size.totalBytes,
         );
-        return proxyUrl;
       } catch (e) {
-        if (e.toString().contains('RequestLimitExceeded') && attempt < 2) {
-          debugPrint('[YouTubeService] Rate limited, will retry...');
-          _markRateLimited(seconds: 15);
-          continue;
-        }
-        if (e.toString().contains('RequestLimitExceeded')) {
+        lastError = e;
+        debugPrint(
+          '[YouTubeService] Playback manifest failed via '
+          '${attempt.label}: $e',
+        );
+        if (_isRateLimitError(e)) {
           _markRateLimited();
           _freshClient();
+          throw Exception(_rateLimitMessage);
         }
-        rethrow;
+        _freshClient();
       }
     }
-    throw Exception('Failed to get stream URL after retries');
+
+    final detail = lastError == null
+        ? ''
+        : ' Last error: ${lastError.toString().split('\n').first}';
+    throw Exception('Unable to resolve this YouTube audio stream.$detail');
   }
 
-  /// Extract audio for INSTANT playback — returns SongModel with stream URL.
-  /// If already cached locally, uses the cached file instead.
-  /// This does NOT download the file — the player streams it directly.
-  static Future<SongModel> extractAudio(YouTubeResult result) async {
+  static String _contentTypeFor(AudioOnlyStreamInfo stream) {
+    if (stream.container.name == 'webm') return 'audio/webm';
+    if (stream.container.name == 'mp4') return 'audio/mp4';
+    return 'application/octet-stream';
+  }
+
+  static Map<String, String> _headersForStreamUri(Uri uri) {
+    final client = uri.queryParameters['c']?.toUpperCase();
+    final userAgent = switch (client) {
+      'ANDROID' => _androidUserAgent,
+      'ANDROID_MUSIC' => _androidMusicUserAgent,
+      'IOS' => _iosUserAgent,
+      'WEB' => _safariUserAgent,
+      _ => _desktopUserAgent,
+    };
+
+    return {
+      HttpHeaders.userAgentHeader: userAgent,
+      HttpHeaders.acceptHeader: '*/*',
+      HttpHeaders.refererHeader: 'https://www.youtube.com/',
+      'Origin': 'https://www.youtube.com',
+    };
+  }
+
+  /// Extract audio for playback by caching the YouTube stream first.
+  /// Windows/media_kit is unreliable with direct googlevideo URLs, so the
+  /// player only receives a local file path.
+  static Future<SongModel> extractAudio(
+    YouTubeResult result, {
+    PlaybackCancelCheck? shouldCancel,
+  }) async {
     try {
-      // Check if already cached locally
+      _throwIfCancelled(shouldCancel);
       final existing = await getCachedPath(result.videoId);
       if (existing != null) {
+        _throwIfCancelled(shouldCancel);
         debugPrint('[YouTubeService] Using cached file: $existing');
         return SongModel.fromYouTube(
           videoId: result.videoId,
@@ -362,34 +497,163 @@ class YouTubeService {
         );
       }
 
-      // Get the stream URL for instant playback (no download needed!)
-      final streamUrl = await getStreamUrl(result.videoId);
+      debugPrint(
+        '[YouTubeService] Caching YouTube audio for playback: ${result.videoId}',
+      );
+      final cachedPath = await _downloadAudioDeduped(
+        videoId: result.videoId,
+        targetDir: (await _getCacheDir()).path,
+        shouldCancel: shouldCancel,
+      );
+      _throwIfCancelled(shouldCancel);
 
       return SongModel.fromYouTube(
         videoId: result.videoId,
         title: result.title,
         artist: result.author,
-        streamUrl: streamUrl,
+        streamUrl: cachedPath,
         thumbnailUrl: result.thumbnailUrl,
         duration: result.duration,
       );
     } catch (e) {
-      debugPrint('[YouTubeService] extractAudio error: $e');
+      if (!isPlaybackCancelled(e)) {
+        debugPrint('[YouTubeService] extractAudio error: $e');
+      }
       rethrow;
     }
   }
 
-  /// Download audio to a file using HTTP (not youtube_explode streams).
-  /// This is more reliable on Windows than the stream-based approach.
+  /// Cache a YouTube song locally and return a SongModel that points at the
+  /// playable local file. Used as a Windows fallback when MPV rejects a signed
+  /// googlevideo URL.
+  static Future<SongModel> cacheForPlayback(SongModel song) async {
+    if (!song.isYouTube) return song;
+
+    final videoId = song.id.replaceFirst('yt_', '');
+    final cachedPath =
+        await getCachedPath(videoId) ??
+        await _downloadAudioDeduped(
+          videoId: videoId,
+          targetDir: (await _getCacheDir()).path,
+        );
+
+    return SongModel.fromYouTube(
+      videoId: videoId,
+      title: song.title,
+      artist: song.artist,
+      streamUrl: cachedPath,
+      thumbnailUrl: song.thumbnailUrl ?? '',
+      duration: song.duration,
+    );
+  }
+
+  static Future<String> _downloadAudioDeduped({
+    required String videoId,
+    required String targetDir,
+    PlaybackCancelCheck? shouldCancel,
+  }) async {
+    final downloadKey = '$targetDir${Platform.pathSeparator}$videoId';
+    final activeDownload = _activeDownloads[downloadKey];
+    if (activeDownload != null) {
+      debugPrint('[YouTubeService] Waiting for in-progress download: $videoId');
+      final path = await activeDownload;
+      _throwIfCancelled(shouldCancel);
+      return path;
+    }
+
+    final downloadFuture = _downloadAudio(
+      videoId: videoId,
+      targetDir: targetDir,
+      shouldCancel: shouldCancel,
+    );
+    _activeDownloads[downloadKey] = downloadFuture;
+
+    try {
+      return await downloadFuture;
+    } finally {
+      if (identical(_activeDownloads[downloadKey], downloadFuture)) {
+        _activeDownloads.remove(downloadKey);
+      }
+    }
+  }
+
+  static Future<void> _deleteStaleTempFiles(
+    String targetDir,
+    String videoId,
+  ) async {
+    final dir = Directory(targetDir);
+    if (!await dir.exists()) return;
+
+    try {
+      await for (final entity in dir.list()) {
+        if (entity is! File) continue;
+        final name = entity.path.split(Platform.pathSeparator).last;
+        if (name.startsWith('$videoId.') && name.endsWith('.tmp')) {
+          await entity.delete();
+        }
+      }
+    } catch (e) {
+      debugPrint('[YouTubeService] Temp cleanup skipped: $e');
+    }
+  }
+
+  /// Download audio to a local file using youtube_explode's stream client.
+  /// This handles YouTube range requests and manifest refreshes for us.
   static Future<String> _downloadAudio({
     required String videoId,
     required String targetDir,
+    List<YoutubeApiClient>? ytClients,
+    String clientLabel = 'default',
+    int fallbackIndex = 0,
+    PlaybackCancelCheck? shouldCancel,
   }) async {
+    _throwIfCancelled(shouldCancel);
+    if (_isRateLimited) {
+      throw Exception(_rateLimitMessage);
+    }
+
+    final useFirstDownloadAttempt =
+        ytClients == null && clientLabel == 'default' && fallbackIndex == 0;
+    final effectiveAttempt = useFirstDownloadAttempt
+        ? _downloadClientFallbacks.first
+        : _DownloadClientAttempt(clientLabel, ytClients);
+    final effectiveFallbackIndex = useFirstDownloadAttempt ? 1 : fallbackIndex;
+
     debugPrint(
-      '[YouTubeService] Getting stream manifest for download: $videoId',
+      '[YouTubeService] Getting stream manifest for download: $videoId (${effectiveAttempt.label})',
     );
 
-    final manifest = await _client.videos.streams.getManifest(videoId);
+    late final StreamManifest manifest;
+    try {
+      manifest = await _client.videos.streams
+          .getManifest(videoId, ytClients: effectiveAttempt.clients)
+          .timeout(_manifestTimeout);
+    } catch (e) {
+      if (isPlaybackCancelled(e)) rethrow;
+      if (_isRateLimitError(e)) {
+        _markRateLimited();
+        _freshClient();
+        throw Exception(_rateLimitMessage);
+      }
+      if (effectiveFallbackIndex < _downloadClientFallbacks.length) {
+        final fallback = _downloadClientFallbacks[effectiveFallbackIndex];
+        debugPrint(
+          '[YouTubeService] Manifest failed via ${effectiveAttempt.label}. '
+          'Retrying with ${fallback.label}: $e',
+        );
+        _freshClient();
+        return _downloadAudio(
+          videoId: videoId,
+          targetDir: targetDir,
+          ytClients: fallback.clients,
+          clientLabel: fallback.label,
+          fallbackIndex: effectiveFallbackIndex + 1,
+          shouldCancel: shouldCancel,
+        );
+      }
+      rethrow;
+    }
+    _throwIfCancelled(shouldCancel);
     final audioStreams = manifest.audioOnly.toList();
 
     if (audioStreams.isEmpty) {
@@ -399,56 +663,71 @@ class YouTubeService {
     final bestAudio = _selectBestStream(audioStreams);
     final ext = bestAudio.container.name == 'webm' ? 'webm' : 'm4a';
     final targetPath = '$targetDir${Platform.pathSeparator}$videoId.$ext';
+    final totalBytes = bestAudio.size.totalBytes;
 
     // Check if already fully downloaded
     final existingTarget = File(targetPath);
-    if (await existingTarget.exists() && await existingTarget.length() > 1000) {
-      debugPrint('[YouTubeService] Already downloaded: $targetPath');
-      return targetPath;
+    if (await existingTarget.exists()) {
+      final existingLength = await existingTarget.length();
+      final isComplete = totalBytes > 0
+          ? existingLength >= (totalBytes * 0.98).floor()
+          : existingLength > 1000;
+
+      if (isComplete) {
+        _throwIfCancelled(shouldCancel);
+        debugPrint('[YouTubeService] Already downloaded: $targetPath');
+        return targetPath;
+      }
+
+      debugPrint(
+        '[YouTubeService] Removing incomplete download: $targetPath '
+        '($existingLength/$totalBytes bytes)',
+      );
+      try {
+        await existingTarget.delete();
+      } catch (_) {}
     }
 
     final timestamp = DateTime.now().millisecondsSinceEpoch;
-    final tempPath = '$targetPath.$timestamp.tmp';
-    final totalBytes = bestAudio.size.totalBytes;
-    final downloadUrl = bestAudio.url.toString();
-
+    await _deleteStaleTempFiles(targetDir, videoId);
+    final tempPath = '$targetPath.${effectiveAttempt.label}.$timestamp.tmp';
     debugPrint(
-      '[YouTubeService] Downloading ${(totalBytes / 1024 / 1024).toStringAsFixed(1)} MB via HTTP → $targetPath',
+      '[YouTubeService] Downloading ${(totalBytes / 1024 / 1024).toStringAsFixed(1)} MB via ${effectiveAttempt.label} -> $targetPath',
     );
 
     try {
-      // Use HTTP client for reliable downloading on Windows
-      final request = http.Request('GET', Uri.parse(downloadUrl));
-      final response = await http.Client().send(request);
-
-      if (response.statusCode != 200) {
-        throw Exception('HTTP ${response.statusCode}');
-      }
-
+      // Let youtube_explode handle YouTube-specific range requests and manifest refreshes.
       final file = File(tempPath);
       final sink = file.openWrite();
       int downloadedBytes = 0;
       int lastLogPercent = 0;
 
-      await for (final chunk in response.stream) {
-        sink.add(chunk);
-        downloadedBytes += chunk.length;
+      try {
+        final stream = _client.videos.streams
+            .get(bestAudio)
+            .timeout(_downloadStallTimeout);
 
-        // Log progress every 10%
-        if (totalBytes > 0) {
-          final percent = (downloadedBytes * 100 ~/ totalBytes);
-          if (percent >= lastLogPercent + 10) {
-            lastLogPercent = percent;
-            debugPrint(
-              '[YouTubeService] Download progress: $percent% '
-              '(${(downloadedBytes / 1024 / 1024).toStringAsFixed(1)} MB)',
-            );
+        await for (final chunk in stream) {
+          _throwIfCancelled(shouldCancel);
+          sink.add(chunk);
+          downloadedBytes += chunk.length;
+
+          // Log progress every 10%
+          if (totalBytes > 0) {
+            final percent = (downloadedBytes * 100 ~/ totalBytes);
+            if (percent >= lastLogPercent + 10) {
+              lastLogPercent = percent;
+              debugPrint(
+                '[YouTubeService] Download progress: $percent% '
+                '(${(downloadedBytes / 1024 / 1024).toStringAsFixed(1)} MB)',
+              );
+            }
           }
         }
+        await sink.flush();
+      } finally {
+        await sink.close();
       }
-
-      await sink.flush();
-      await sink.close();
 
       // Verify file size
       final fileSize = await File(tempPath).length();
@@ -476,6 +755,30 @@ class YouTubeService {
         final tf = File(tempPath);
         if (await tf.exists()) await tf.delete();
       } catch (_) {}
+      if (isPlaybackCancelled(e)) {
+        debugPrint('[YouTubeService] Download cancelled: $videoId');
+        rethrow;
+      }
+      if (_isRateLimitError(e)) {
+        _markRateLimited();
+        _freshClient();
+        throw Exception(_rateLimitMessage);
+      }
+      if (effectiveFallbackIndex < _downloadClientFallbacks.length) {
+        final fallback = _downloadClientFallbacks[effectiveFallbackIndex];
+        debugPrint(
+          '[YouTubeService] Retrying download with ${fallback.label} client...',
+        );
+        _freshClient();
+        return _downloadAudio(
+          videoId: videoId,
+          targetDir: targetDir,
+          ytClients: fallback.clients,
+          clientLabel: fallback.label,
+          fallbackIndex: effectiveFallbackIndex + 1,
+          shouldCancel: shouldCancel,
+        );
+      }
       rethrow;
     }
   }
@@ -490,27 +793,10 @@ class YouTubeService {
     }
 
     final dlDir = await getDownloadsDir();
-    final downloadKey = result.videoId;
-
-    // If a download is already in progress for this video, wait for it
-    if (_activeDownloads.containsKey(downloadKey)) {
-      debugPrint(
-        '[YouTubeService] Waiting for in-progress download: $downloadKey',
-      );
-      return _activeDownloads[downloadKey]!;
-    }
-
-    final downloadFuture = _downloadAudio(
+    return _downloadAudioDeduped(
       videoId: result.videoId,
       targetDir: dlDir.path,
     );
-    _activeDownloads[downloadKey] = downloadFuture;
-
-    try {
-      return await downloadFuture;
-    } finally {
-      _activeDownloads.remove(downloadKey);
-    }
   }
 
   /// Extract audio from a YouTube URL directly (paste URL → play)
@@ -519,6 +805,9 @@ class YouTubeService {
       final videoId = VideoId.parseVideoId(url);
       if (videoId == null) {
         throw Exception('Invalid YouTube URL');
+      }
+      if (_isRateLimited) {
+        throw Exception(_rateLimitMessage);
       }
 
       final video = await _client.videos.get(videoId);
@@ -566,6 +855,8 @@ class YouTubeProxyServer {
     String sourceUrl, {
     String contentType = 'audio/mp4',
     String extension = 'm4a',
+    Map<String, String> headers = const {},
+    int? totalBytes,
   }) async {
     if (_server == null) {
       _server = await HttpServer.bind(
@@ -591,57 +882,107 @@ class YouTubeProxyServer {
             return;
           }
 
+          final method = request.method.toUpperCase();
+          final rangeHeader = request.headers.value(HttpHeaders.rangeHeader);
+          final requestedRange = _ByteRange.parse(
+            rangeHeader,
+            target.totalBytes,
+          );
+          var targetUri = Uri.parse(target.sourceUrl);
+          final shouldForceRange =
+              targetUri.host.toLowerCase().endsWith('googlevideo.com') &&
+              target.totalBytes != null;
+          final upstreamRange =
+              requestedRange ??
+              (shouldForceRange ? _ByteRange(0, target.totalBytes! - 1) : null);
+          final useRangeQuery =
+              upstreamRange != null && _shouldUseRangeQuery(targetUri);
+
+          debugPrint(
+            '[YouTubeProxy] $method ${request.uri.path} '
+            '${rangeHeader ?? ''}',
+          );
+
+          if (method == 'HEAD') {
+            _writeProxyHeaders(
+              request.response,
+              target,
+              statusCode: HttpStatus.ok,
+              contentLength: target.totalBytes,
+            );
+            await request.response.close();
+            return;
+          }
+
+          if (useRangeQuery) {
+            targetUri = targetUri.replace(
+              queryParameters: {
+                ...targetUri.queryParameters,
+                'range': upstreamRange.queryValue,
+              },
+            );
+          }
+
           client = HttpClient();
           client.userAgent =
-              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36';
+              target.headers[HttpHeaders.userAgentHeader] ??
+              YouTubeService._desktopUserAgent;
 
-          final ytRequest = await client.getUrl(Uri.parse(target.sourceUrl));
+          final ytRequest = await client.getUrl(targetUri);
           ytRequest.followRedirects = true;
+          target.headers.forEach(ytRequest.headers.set);
 
-          // Crucial: Forward the Range header from MPV to YouTube so it can seek the moov atom!
-          final rangeHeader = request.headers.value(HttpHeaders.rangeHeader);
-          if (rangeHeader != null) {
+          // Forward Range so MPV can seek the MP4/WebM metadata cleanly.
+          if (upstreamRange != null && !useRangeQuery) {
+            ytRequest.headers.set(
+              HttpHeaders.rangeHeader,
+              upstreamRange.headerValue,
+            );
+          } else if (rangeHeader != null && !useRangeQuery) {
             ytRequest.headers.set(HttpHeaders.rangeHeader, rangeHeader);
-          } else {
-            ytRequest.headers.set(HttpHeaders.acceptHeader, '*/*');
           }
 
           final ytResponse = await ytRequest.close();
 
-          request.response.headers.set(
-            HttpHeaders.contentTypeHeader,
-            target.contentType,
-          );
-          request.response.headers.set(HttpHeaders.acceptRangesHeader, 'bytes');
-          request.response.headers.set(
-            HttpHeaders.connectionHeader,
-            'keep-alive',
-          );
-          request.response.headers.set(
-            HttpHeaders.cacheControlHeader,
-            'no-cache',
-          );
-
           // Pass through the exact status code (200 OK or 206 Partial Content)
-          request.response.statusCode = ytResponse.statusCode;
+          final statusCode = _proxyStatusCode(
+            requestedRange: requestedRange,
+            upstreamRange: upstreamRange,
+            upstreamStatusCode: ytResponse.statusCode,
+          );
 
           // Forward crucial length and range response headers back to MPV
           final contentLength = ytResponse.headers.value(
             HttpHeaders.contentLengthHeader,
           );
-          if (contentLength != null) {
-            request.response.headers.set(
-              HttpHeaders.contentLengthHeader,
-              contentLength,
-            );
-          }
           final contentRange = ytResponse.headers.value(
             HttpHeaders.contentRangeHeader,
           );
-          if (contentRange != null) {
-            request.response.headers.set(
-              HttpHeaders.contentRangeHeader,
-              contentRange,
+          final parsedLength = int.tryParse(contentLength ?? '');
+          final responseContentRange = statusCode == HttpStatus.partialContent
+              ? contentRange ??
+                    (upstreamRange != null && target.totalBytes != null
+                        ? upstreamRange.contentRangeHeader(
+                            target.totalBytes!,
+                            parsedLength,
+                          )
+                        : null)
+              : null;
+
+          _writeProxyHeaders(
+            request.response,
+            target,
+            statusCode: statusCode,
+            contentLength: statusCode >= HttpStatus.badRequest
+                ? parsedLength
+                : parsedLength ?? target.totalBytes,
+            contentRange: responseContentRange,
+          );
+
+          if (ytResponse.statusCode >= HttpStatus.badRequest) {
+            debugPrint(
+              '[YouTubeProxy] Upstream HTTP ${ytResponse.statusCode} '
+              'for ${targetUri.host}',
             );
           }
 
@@ -663,22 +1004,148 @@ class YouTubeProxyServer {
     _streams[streamId] = _ProxyTarget(
       sourceUrl: sourceUrl,
       contentType: contentType,
+      headers: headers,
+      totalBytes: totalBytes,
     );
     _trimOldStreams();
 
     return 'http://127.0.0.1:${_server!.port}/$streamId.$extension';
   }
 
+  static int _proxyStatusCode({
+    required _ByteRange? requestedRange,
+    required _ByteRange? upstreamRange,
+    required int upstreamStatusCode,
+  }) {
+    if (upstreamStatusCode >= HttpStatus.badRequest) {
+      return upstreamStatusCode;
+    }
+    if (requestedRange != null) {
+      return HttpStatus.partialContent;
+    }
+    if (upstreamRange != null &&
+        upstreamStatusCode == HttpStatus.partialContent) {
+      return HttpStatus.ok;
+    }
+    return upstreamStatusCode;
+  }
+
+  static void _writeProxyHeaders(
+    HttpResponse response,
+    _ProxyTarget target, {
+    required int statusCode,
+    int? contentLength,
+    String? contentRange,
+  }) {
+    response.statusCode = statusCode;
+    response.headers.set(HttpHeaders.contentTypeHeader, target.contentType);
+    response.headers.set(HttpHeaders.acceptRangesHeader, 'bytes');
+    response.headers.set(HttpHeaders.cacheControlHeader, 'no-cache');
+    if (contentLength != null && contentLength >= 0) {
+      response.headers.set(HttpHeaders.contentLengthHeader, contentLength);
+    }
+    if (contentRange != null) {
+      response.headers.set(HttpHeaders.contentRangeHeader, contentRange);
+    }
+  }
+
   static void _trimOldStreams() {
-    while (_streams.length > 8) {
+    while (_streams.length > 32) {
       _streams.remove(_streams.keys.first);
     }
+  }
+
+  static bool _shouldUseRangeQuery(Uri uri) {
+    if (!uri.host.toLowerCase().endsWith('googlevideo.com')) return false;
+    return uri.queryParameters['c']?.toUpperCase() != 'ANDROID';
   }
 }
 
 class _ProxyTarget {
   final String sourceUrl;
   final String contentType;
+  final Map<String, String> headers;
+  final int? totalBytes;
 
-  const _ProxyTarget({required this.sourceUrl, required this.contentType});
+  const _ProxyTarget({
+    required this.sourceUrl,
+    required this.contentType,
+    required this.headers,
+    required this.totalBytes,
+  });
+}
+
+class _ByteRange {
+  final int start;
+  final int? end;
+
+  const _ByteRange(this.start, this.end);
+
+  String get queryValue => end == null ? '$start-' : '$start-$end';
+  String get headerValue => 'bytes=$queryValue';
+
+  String contentRangeHeader(int totalBytes, int? contentLength) {
+    final resolvedEnd = end ?? start + (contentLength ?? 1) - 1;
+    return 'bytes $start-$resolvedEnd/$totalBytes';
+  }
+
+  static _ByteRange? parse(String? header, int? totalBytes) {
+    if (header == null) return null;
+
+    final match = RegExp(r'^bytes=(\d*)-(\d*)$').firstMatch(header.trim());
+    if (match == null) return null;
+
+    final startText = match.group(1) ?? '';
+    final endText = match.group(2) ?? '';
+    if (startText.isEmpty && endText.isEmpty) return null;
+
+    if (startText.isEmpty) {
+      final suffixLength = int.tryParse(endText);
+      if (suffixLength == null || suffixLength <= 0 || totalBytes == null) {
+        return null;
+      }
+      final start = suffixLength >= totalBytes ? 0 : totalBytes - suffixLength;
+      return _ByteRange(start, totalBytes - 1);
+    }
+
+    final start = int.tryParse(startText);
+    if (start == null || start < 0) return null;
+
+    final end = endText.isEmpty
+        ? (totalBytes == null ? null : totalBytes - 1)
+        : int.tryParse(endText);
+    if (end != null && end < start) return null;
+
+    return _ByteRange(start, end);
+  }
+}
+
+class _ResolvedYouTubeStream {
+  final String url;
+  final String contentType;
+  final String extension;
+  final Map<String, String> headers;
+  final int totalBytes;
+
+  const _ResolvedYouTubeStream({
+    required this.url,
+    required this.contentType,
+    required this.extension,
+    required this.headers,
+    required this.totalBytes,
+  });
+}
+
+class YouTubePlaybackCancelledException implements Exception {
+  const YouTubePlaybackCancelledException();
+
+  @override
+  String toString() => 'YouTube playback request cancelled';
+}
+
+class _DownloadClientAttempt {
+  final String label;
+  final List<YoutubeApiClient>? clients;
+
+  const _DownloadClientAttempt(this.label, this.clients);
 }

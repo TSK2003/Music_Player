@@ -78,8 +78,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       ]);
 
       if (mounted) {
-        final playerService =
-            Provider.of<PlayerService>(context, listen: false);
+        final playerService = Provider.of<PlayerService>(
+          context,
+          listen: false,
+        );
         final allSongs = [...results[0], ...results[1]];
         playerService.setSongs(allSongs);
         setState(() {
@@ -100,8 +102,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   Future<void> _addLocalFiles() async {
     final songs = await LocalFileService.pickFiles();
     if (songs.isNotEmpty && mounted) {
-      final playerService =
-          Provider.of<PlayerService>(context, listen: false);
+      final playerService = Provider.of<PlayerService>(context, listen: false);
       playerService.addSongs(songs);
       setState(() {
         _activeTab = 0; // Switch to "All" to show the new songs
@@ -113,8 +114,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   Future<void> _addLocalFolder() async {
     final songs = await LocalFileService.pickFolder();
     if (songs.isNotEmpty && mounted) {
-      final playerService =
-          Provider.of<PlayerService>(context, listen: false);
+      final playerService = Provider.of<PlayerService>(context, listen: false);
       playerService.addSongs(songs);
       setState(() {
         _activeTab = 0;
@@ -146,7 +146,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   }
 
   void _playSelected(List<SongModel> allSongs) {
-    final selected = allSongs.where((s) => _selectedIds.contains(s.id)).toList();
+    final selected = allSongs
+        .where((s) => _selectedIds.contains(s.id))
+        .toList();
     if (selected.isEmpty) return;
     final playerService = Provider.of<PlayerService>(context, listen: false);
     playerService.playSong(selected.first, playlist: selected);
@@ -157,14 +159,18 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   }
 
   Future<void> _downloadSelected(List<SongModel> allSongs) async {
-    final selected = allSongs.where((s) => _selectedIds.contains(s.id)).toList();
+    final selected = allSongs
+        .where((s) => _selectedIds.contains(s.id))
+        .toList();
     if (selected.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: const Text('No songs selected'),
           backgroundColor: AppColors.accentPink.withValues(alpha: 0.9),
           behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
         ),
       );
       return;
@@ -180,7 +186,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           content: Text('${localSongs.length} song(s) already on device'),
           backgroundColor: Colors.green.withValues(alpha: 0.9),
           behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
         ),
       );
       setState(() {
@@ -230,8 +238,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           if (uri.startsWith('http')) {
             final response = await http.get(Uri.parse(uri));
             if (response.statusCode == 200) {
-              final safeName = song.title.replaceAll(RegExp(r'[<>:"/\\|?*]'), '_');
-              final filePath = '${dlDir.path}${Platform.pathSeparator}$safeName.m4a';
+              final safeName = song.title.replaceAll(
+                RegExp(r'[<>:"/\\|?*]'),
+                '_',
+              );
+              final filePath =
+                  '${dlDir.path}${Platform.pathSeparator}$safeName.m4a';
               await File(filePath).writeAsBytes(response.bodyBytes);
               debugPrint('[HomeScreen] Downloaded Drive song: $filePath');
             } else {
@@ -258,7 +270,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               ? Colors.green.withValues(alpha: 0.9)
               : AppColors.accentPink.withValues(alpha: 0.9),
           behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
         ),
       );
     }
@@ -273,8 +287,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
   List<SongModel> get _filteredSongs {
     final playerService = Provider.of<PlayerService>(context, listen: false);
-    final favoritesService = Provider.of<FavoritesService>(context, listen: false);
-    
+    final favoritesService = Provider.of<FavoritesService>(
+      context,
+      listen: false,
+    );
+
     List<SongModel> base;
     switch (_activeTab) {
       case 1: // Favorites
@@ -295,10 +312,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     if (_searchQuery.isEmpty) return base;
     final query = _searchQuery.toLowerCase();
     return base
-        .where((song) =>
-            song.title.toLowerCase().contains(query) ||
-            song.artist.toLowerCase().contains(query) ||
-            (song.category?.toLowerCase().contains(query) ?? false))
+        .where(
+          (song) =>
+              song.title.toLowerCase().contains(query) ||
+              song.artist.toLowerCase().contains(query) ||
+              (song.category?.toLowerCase().contains(query) ?? false),
+        )
         .toList();
   }
 
@@ -312,17 +331,14 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         },
         transitionsBuilder: (context, animation, secondaryAnimation, child) {
           return SlideTransition(
-            position: Tween<Offset>(
-              begin: const Offset(0, 1),
-              end: Offset.zero,
-            ).animate(CurvedAnimation(
-              parent: animation,
-              curve: Curves.easeOutCubic,
-            )),
-            child: FadeTransition(
-              opacity: animation,
-              child: child,
-            ),
+            position: Tween<Offset>(begin: const Offset(0, 1), end: Offset.zero)
+                .animate(
+                  CurvedAnimation(
+                    parent: animation,
+                    curve: Curves.easeOutCubic,
+                  ),
+                ),
+            child: FadeTransition(opacity: animation, child: child),
           );
         },
       ),
@@ -361,18 +377,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 ),
                 slivers: [
                   // App title
-                  SliverToBoxAdapter(
-                    child: _buildTitle(),
-                  ),
+                  SliverToBoxAdapter(child: _buildTitle()),
                   // Search bar
-                  SliverToBoxAdapter(
-                    child: _buildSearchBar(),
-                  ),
+                  SliverToBoxAdapter(child: _buildSearchBar()),
                   // Tab bar
                   if (!_selectionMode)
-                    SliverToBoxAdapter(
-                      child: _buildTabBar(),
-                    ),
+                    SliverToBoxAdapter(child: _buildTabBar()),
                   // Selection toolbar
                   if (_selectionMode)
                     SliverToBoxAdapter(
@@ -380,9 +390,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                     ),
                   // Categories
                   if (!_selectionMode)
-                    SliverToBoxAdapter(
-                      child: _buildCategories(),
-                    ),
+                    SliverToBoxAdapter(child: _buildCategories()),
                   // Songs count
                   if (!_isLoading)
                     SliverToBoxAdapter(
@@ -390,55 +398,44 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                     ),
                   // Song list or loading
                   if (_isLoading)
-                    const SliverToBoxAdapter(
-                      child: ShimmerLoading(),
-                    )
+                    const SliverToBoxAdapter(child: ShimmerLoading())
                   else if (_error != null)
-                    SliverToBoxAdapter(
-                      child: _buildError(),
-                    )
+                    SliverToBoxAdapter(child: _buildError())
                   else if (filteredSongs.isEmpty)
-                    SliverToBoxAdapter(
-                      child: _buildEmpty(),
-                    )
+                    SliverToBoxAdapter(child: _buildEmpty())
                   else
                     SliverList(
-                      delegate: SliverChildBuilderDelegate(
-                        (context, index) {
-                          final song = filteredSongs[index];
-                          final isPlaying = currentSong?.id == song.id;
-                          final isSelected = _selectedIds.contains(song.id);
+                      delegate: SliverChildBuilderDelegate((context, index) {
+                        final song = filteredSongs[index];
+                        final isPlaying = currentSong?.id == song.id;
+                        final isSelected = _selectedIds.contains(song.id);
 
-                          return SongCard(
-                            song: song,
-                            isPlaying: isPlaying,
-                            isSelected: isSelected,
-                            selectionMode: _selectionMode,
-                            index: index,
-                            onTap: _selectionMode
-                                ? () => _toggleSelection(song.id)
-                                : () {
-                                    playerService.playSong(
-                                      song,
-                                      playlist: filteredSongs,
-                                    );
-                                  },
-                            onLongPress: () {
-                              if (!_selectionMode) {
-                                setState(() => _selectionMode = true);
-                              }
-                              _toggleSelection(song.id);
-                            },
-                          );
-                        },
-                        childCount: filteredSongs.length,
-                      ),
+                        return SongCard(
+                          song: song,
+                          isPlaying: isPlaying,
+                          isSelected: isSelected,
+                          selectionMode: _selectionMode,
+                          index: index,
+                          onTap: _selectionMode
+                              ? () => _toggleSelection(song.id)
+                              : () {
+                                  playerService.playSong(
+                                    song,
+                                    playlist: filteredSongs,
+                                  );
+                                },
+                          onLongPress: () {
+                            if (!_selectionMode) {
+                              setState(() => _selectionMode = true);
+                            }
+                            _toggleSelection(song.id);
+                          },
+                        );
+                      }, childCount: filteredSongs.length),
                     ),
                   // Bottom padding for mini player
                   SliverToBoxAdapter(
-                    child: SizedBox(
-                      height: currentSong != null ? 100 : 20,
-                    ),
+                    child: SizedBox(height: currentSong != null ? 100 : 20),
                   ),
                 ],
               ),
@@ -448,9 +445,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   bottom: 0,
                   left: 0,
                   right: 0,
-                  child: MiniPlayer(
-                    onTap: _openPlayer,
-                  ),
+                  child: MiniPlayer(onTap: _openPlayer),
                 ),
             ],
           ),
@@ -466,13 +461,13 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         curve: const Interval(0.0, 0.6, curve: Curves.easeOut),
       ),
       child: SlideTransition(
-        position: Tween<Offset>(
-          begin: const Offset(0, -0.3),
-          end: Offset.zero,
-        ).animate(CurvedAnimation(
-          parent: _titleController,
-          curve: const Interval(0.0, 0.6, curve: Curves.easeOutCubic),
-        )),
+        position: Tween<Offset>(begin: const Offset(0, -0.3), end: Offset.zero)
+            .animate(
+              CurvedAnimation(
+                parent: _titleController,
+                curve: const Interval(0.0, 0.6, curve: Curves.easeOutCubic),
+              ),
+            ),
         child: Padding(
           padding: const EdgeInsets.fromLTRB(24, 20, 24, 8),
           child: Row(
@@ -499,58 +494,67 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 ),
               ),
               const SizedBox(width: 14),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  ShaderMask(
-                    shaderCallback: (bounds) => const LinearGradient(
-                      colors: [AppColors.neonBlue, AppColors.neonPurple],
-                    ).createShader(bounds),
-                    child: Text(
-                      'Music Player',
-                      style:
-                          Theme.of(context).textTheme.displayMedium?.copyWith(
-                                color: Colors.white,
-                                fontSize: 22,
-                              ),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    ShaderMask(
+                      shaderCallback: (bounds) => const LinearGradient(
+                        colors: [AppColors.neonBlue, AppColors.neonPurple],
+                      ).createShader(bounds),
+                      child: Text(
+                        'Music Player',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.displayMedium
+                            ?.copyWith(color: Colors.white, fontSize: 22),
+                      ),
                     ),
-                  ),
-                  Text(
-                    'Antigravity Experience',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: AppColors.textMuted,
-                          letterSpacing: 1.5,
-                          fontSize: 10,
-                        ),
-                  ),
-                ],
+                    Text(
+                      'Antigravity Experience',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: AppColors.textMuted,
+                        letterSpacing: 1.5,
+                        fontSize: 10,
+                      ),
+                    ),
+                  ],
+                ),
               ),
-              const Spacer(),
+              const SizedBox(width: 8),
               // YouTube search button
               GestureDetector(
                 onTap: () {
                   Navigator.of(context).push(
                     PageRouteBuilder(
                       transitionDuration: const Duration(milliseconds: 400),
-                      reverseTransitionDuration: const Duration(milliseconds: 300),
+                      reverseTransitionDuration: const Duration(
+                        milliseconds: 300,
+                      ),
                       pageBuilder: (context, animation, secondaryAnimation) {
                         return const YouTubeSearchScreen();
                       },
-                      transitionsBuilder: (context, animation, secondaryAnimation, child) {
-                        return FadeTransition(
-                          opacity: animation,
-                          child: SlideTransition(
-                            position: Tween<Offset>(
-                              begin: const Offset(0, 0.1),
-                              end: Offset.zero,
-                            ).animate(CurvedAnimation(
-                              parent: animation,
-                              curve: Curves.easeOutCubic,
-                            )),
-                            child: child,
-                          ),
-                        );
-                      },
+                      transitionsBuilder:
+                          (context, animation, secondaryAnimation, child) {
+                            return FadeTransition(
+                              opacity: animation,
+                              child: SlideTransition(
+                                position:
+                                    Tween<Offset>(
+                                      begin: const Offset(0, 0.1),
+                                      end: Offset.zero,
+                                    ).animate(
+                                      CurvedAnimation(
+                                        parent: animation,
+                                        curve: Curves.easeOutCubic,
+                                      ),
+                                    ),
+                                child: child,
+                              ),
+                            );
+                          },
                     ),
                   );
                 },
@@ -592,25 +596,31 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   Navigator.of(context).push(
                     PageRouteBuilder(
                       transitionDuration: const Duration(milliseconds: 400),
-                      reverseTransitionDuration: const Duration(milliseconds: 300),
+                      reverseTransitionDuration: const Duration(
+                        milliseconds: 300,
+                      ),
                       pageBuilder: (context, animation, secondaryAnimation) {
                         return const ProfileScreen();
                       },
-                      transitionsBuilder: (context, animation, secondaryAnimation, child) {
-                        return FadeTransition(
-                          opacity: animation,
-                          child: SlideTransition(
-                            position: Tween<Offset>(
-                              begin: const Offset(1, 0),
-                              end: Offset.zero,
-                            ).animate(CurvedAnimation(
-                              parent: animation,
-                              curve: Curves.easeOutCubic,
-                            )),
-                            child: child,
-                          ),
-                        );
-                      },
+                      transitionsBuilder:
+                          (context, animation, secondaryAnimation, child) {
+                            return FadeTransition(
+                              opacity: animation,
+                              child: SlideTransition(
+                                position:
+                                    Tween<Offset>(
+                                      begin: const Offset(1, 0),
+                                      end: Offset.zero,
+                                    ).animate(
+                                      CurvedAnimation(
+                                        parent: animation,
+                                        curve: Curves.easeOutCubic,
+                                      ),
+                                    ),
+                                child: child,
+                              ),
+                            );
+                          },
                     ),
                   );
                 },
@@ -680,17 +690,17 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   });
                 },
                 style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                      color: Theme.of(context).brightness == Brightness.dark
-                          ? AppColors.textPrimary
-                          : AppColors.lightTextPrimary,
-                    ),
+                  color: Theme.of(context).brightness == Brightness.dark
+                      ? AppColors.textPrimary
+                      : AppColors.lightTextPrimary,
+                ),
                 decoration: InputDecoration(
                   hintText: 'Search songs...',
                   hintStyle: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                        color: Theme.of(context).brightness == Brightness.dark
-                            ? AppColors.textMuted
-                            : AppColors.lightTextMuted,
-                      ),
+                    color: Theme.of(context).brightness == Brightness.dark
+                        ? AppColors.textMuted
+                        : AppColors.lightTextMuted,
+                  ),
                   prefixIcon: Icon(
                     Icons.search_rounded,
                     color: Theme.of(context).brightness == Brightness.dark
@@ -708,7 +718,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                           },
                           child: Icon(
                             Icons.close_rounded,
-                            color: Theme.of(context).brightness == Brightness.dark
+                            color:
+                                Theme.of(context).brightness == Brightness.dark
                                 ? AppColors.textMuted
                                 : AppColors.lightTextSecondary,
                             size: 20,
@@ -755,14 +766,14 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   color: isActive
                       ? AppColors.neonBlue.withValues(alpha: 0.15)
                       : (Theme.of(context).brightness == Brightness.dark
-                          ? Colors.white.withValues(alpha: 0.04)
-                          : Colors.black.withValues(alpha: 0.03)),
+                            ? Colors.white.withValues(alpha: 0.04)
+                            : Colors.black.withValues(alpha: 0.03)),
                   border: Border.all(
                     color: isActive
                         ? AppColors.neonBlue.withValues(alpha: 0.4)
                         : (Theme.of(context).brightness == Brightness.dark
-                            ? AppColors.glassBorder
-                            : AppColors.lightGlassBorder),
+                              ? AppColors.glassBorder
+                              : AppColors.lightGlassBorder),
                     width: 1,
                   ),
                   boxShadow: isActive
@@ -783,24 +794,24 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                       color: isActive
                           ? AppColors.neonBlue
                           : (Theme.of(context).brightness == Brightness.dark
-                              ? AppColors.textMuted
-                              : AppColors.lightTextSecondary),
+                                ? AppColors.textMuted
+                                : AppColors.lightTextSecondary),
                     ),
                     const SizedBox(width: 4),
                     Flexible(
                       child: Text(
                         tabs[index].label,
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: isActive
-                                  ? AppColors.neonBlue
-                                  : (Theme.of(context).brightness == Brightness.dark
-                                      ? AppColors.textMuted
-                                      : AppColors.lightTextSecondary),
-                              fontWeight: isActive
-                                  ? FontWeight.w600
-                                  : FontWeight.w400,
-                              fontSize: 11,
-                            ),
+                          color: isActive
+                              ? AppColors.neonBlue
+                              : (Theme.of(context).brightness == Brightness.dark
+                                    ? AppColors.textMuted
+                                    : AppColors.lightTextSecondary),
+                          fontWeight: isActive
+                              ? FontWeight.w600
+                              : FontWeight.w400,
+                          fontSize: 11,
+                        ),
                         overflow: TextOverflow.ellipsis,
                         maxLines: 1,
                       ),
@@ -817,15 +828,18 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
   Widget _buildCategories() {
     final playerService = Provider.of<PlayerService>(context);
-    
+
     // Extract unique categories from loaded songs
-    final uniqueCategories = playerService.songs
-        .map((s) => s.category)
-        .whereType<String>() // Filters out nulls
-        .where((c) => c != 'Demo Tracks' && c != 'Local') // Optional: ignore specific tags
-        .toSet()
-        .toList()
-      ..sort();
+    final uniqueCategories =
+        playerService.songs
+            .map((s) => s.category)
+            .whereType<String>() // Filters out nulls
+            .where(
+              (c) => c != 'Demo Tracks' && c != 'Local',
+            ) // Optional: ignore specific tags
+            .toSet()
+            .toList()
+          ..sort();
 
     if (uniqueCategories.isEmpty) {
       return const SizedBox.shrink();
@@ -844,7 +858,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           itemCount: categories.length,
           itemBuilder: (context, index) {
             final category = categories[index];
-            final isActive = category == 'All' ? _searchQuery.isEmpty : _searchQuery.toLowerCase() == category.toLowerCase();
+            final isActive = category == 'All'
+                ? _searchQuery.isEmpty
+                : _searchQuery.toLowerCase() == category.toLowerCase();
             return GestureDetector(
               onTap: () {
                 setState(() {
@@ -862,25 +878,25 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(20),
-                  color: isActive 
-                      ? AppColors.neonPurple.withValues(alpha: 0.2) 
-                      : (Theme.of(context).brightness == Brightness.dark 
-                          ? Colors.white.withValues(alpha: 0.05) 
-                          : Colors.black.withValues(alpha: 0.03)),
+                  color: isActive
+                      ? AppColors.neonPurple.withValues(alpha: 0.2)
+                      : (Theme.of(context).brightness == Brightness.dark
+                            ? Colors.white.withValues(alpha: 0.05)
+                            : Colors.black.withValues(alpha: 0.03)),
                   border: Border.all(
-                    color: isActive 
-                        ? AppColors.neonPurple 
-                        : (Theme.of(context).brightness == Brightness.dark 
-                            ? AppColors.glassBorder 
-                            : AppColors.lightGlassBorder),
+                    color: isActive
+                        ? AppColors.neonPurple
+                        : (Theme.of(context).brightness == Brightness.dark
+                              ? AppColors.glassBorder
+                              : AppColors.lightGlassBorder),
                   ),
                 ),
                 child: Center(
                   child: Text(
                     category,
                     style: TextStyle(
-                      color: isActive 
-                          ? AppColors.neonPurple 
+                      color: isActive
+                          ? AppColors.neonPurple
                           : Theme.of(context).textTheme.bodyMedium?.color,
                       fontSize: 12,
                       fontWeight: isActive ? FontWeight.w600 : FontWeight.w500,
@@ -914,15 +930,13 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           ),
           const SizedBox(width: 8),
           Text(
-            _searchQuery.isEmpty
-                ? '$count Songs'
-                : '$count Results',
+            _searchQuery.isEmpty ? '$count Songs' : '$count Results',
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: Theme.of(context).brightness == Brightness.dark
-                      ? AppColors.textMuted
-                      : AppColors.lightTextSecondary,
-                  letterSpacing: 0.5,
-                ),
+              color: Theme.of(context).brightness == Brightness.dark
+                  ? AppColors.textMuted
+                  : AppColors.lightTextSecondary,
+              letterSpacing: 0.5,
+            ),
           ),
           const Spacer(),
           if (!_selectionMode && count > 0)
@@ -931,7 +945,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 setState(() => _selectionMode = true);
               },
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 5,
+                ),
                 decoration: BoxDecoration(
                   color: Theme.of(context).brightness == Brightness.dark
                       ? Colors.white.withValues(alpha: 0.06)
@@ -957,11 +974,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                     Text(
                       'Select',
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            fontSize: 11,
-                            color: Theme.of(context).brightness == Brightness.dark
-                                ? AppColors.textMuted
-                                : AppColors.lightTextMuted,
-                          ),
+                        fontSize: 11,
+                        color: Theme.of(context).brightness == Brightness.dark
+                            ? AppColors.textMuted
+                            : AppColors.lightTextMuted,
+                      ),
                     ),
                   ],
                 ),
@@ -984,9 +1001,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             ? AppColors.neonBlue.withValues(alpha: 0.1)
             : AppColors.neonBlue.withValues(alpha: 0.06),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          color: AppColors.neonBlue.withValues(alpha: 0.3),
-        ),
+        border: Border.all(color: AppColors.neonBlue.withValues(alpha: 0.3)),
       ),
       child: Row(
         children: [
@@ -997,7 +1012,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Icon(
-                  allSelected ? Icons.deselect_rounded : Icons.select_all_rounded,
+                  allSelected
+                      ? Icons.deselect_rounded
+                      : Icons.select_all_rounded,
                   size: 18,
                   color: AppColors.neonBlue,
                 ),
@@ -1005,10 +1022,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 Text(
                   allSelected ? 'Deselect' : 'Select All',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: AppColors.neonBlue,
-                        fontWeight: FontWeight.w600,
-                        fontSize: 12,
-                      ),
+                    color: AppColors.neonBlue,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 12,
+                  ),
                 ),
               ],
             ),
@@ -1018,14 +1035,16 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           Text(
             '${_selectedIds.length} selected',
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: isDark ? AppColors.textMuted : AppColors.lightTextMuted,
-                  fontSize: 11,
-                ),
+              color: isDark ? AppColors.textMuted : AppColors.lightTextMuted,
+              fontSize: 11,
+            ),
           ),
           const SizedBox(width: 8),
           // Download selected button
           GestureDetector(
-            onTap: _selectedIds.isNotEmpty ? () => _downloadSelected(songs) : null,
+            onTap: _selectedIds.isNotEmpty
+                ? () => _downloadSelected(songs)
+                : null,
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
               decoration: BoxDecoration(
@@ -1037,15 +1056,19 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Icon(Icons.download_rounded, size: 14, color: Colors.white),
+                  const Icon(
+                    Icons.download_rounded,
+                    size: 14,
+                    color: Colors.white,
+                  ),
                   const SizedBox(width: 4),
                   Text(
                     'Download',
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w600,
-                          fontSize: 11,
-                        ),
+                      color: Colors.white,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 11,
+                    ),
                   ),
                 ],
               ),
@@ -1066,15 +1089,19 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Icon(Icons.play_arrow_rounded, size: 14, color: Colors.white),
+                  const Icon(
+                    Icons.play_arrow_rounded,
+                    size: 14,
+                    color: Colors.white,
+                  ),
                   const SizedBox(width: 4),
                   Text(
                     'Play',
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w600,
-                          fontSize: 11,
-                        ),
+                      color: Colors.white,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 11,
+                    ),
                   ),
                 ],
               ),
@@ -1157,21 +1184,21 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               _searchQuery.isNotEmpty
                   ? Icons.search_off_rounded
                   : isFavTab
-                      ? Icons.favorite_border_rounded
-                      : isYouTubeTab
-                          ? Icons.play_circle_outline_rounded
-                          : isLocalTab
-                              ? Icons.folder_open_rounded
-                              : Icons.music_off_rounded,
+                  ? Icons.favorite_border_rounded
+                  : isYouTubeTab
+                  ? Icons.play_circle_outline_rounded
+                  : isLocalTab
+                  ? Icons.folder_open_rounded
+                  : Icons.music_off_rounded,
               color: _searchQuery.isNotEmpty
                   ? AppColors.textMuted
                   : isFavTab
-                      ? AppColors.accentPink
-                      : isYouTubeTab
-                          ? const Color(0xFFFF4444)
-                          : isLocalTab
-                              ? AppColors.accentCyan
-                              : AppColors.textMuted,
+                  ? AppColors.accentPink
+                  : isYouTubeTab
+                  ? const Color(0xFFFF4444)
+                  : isLocalTab
+                  ? AppColors.accentCyan
+                  : AppColors.textMuted,
               size: 48,
             ),
             const SizedBox(height: 16),
@@ -1179,12 +1206,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               _searchQuery.isNotEmpty
                   ? 'No songs found'
                   : isFavTab
-                      ? 'No favorites yet'
-                      : isYouTubeTab
-                          ? 'No YouTube songs yet'
-                          : isLocalTab
-                              ? 'No local files'
-                              : 'No songs available',
+                  ? 'No favorites yet'
+                  : isYouTubeTab
+                  ? 'No YouTube songs yet'
+                  : isLocalTab
+                  ? 'No local files'
+                  : 'No songs available',
               style: Theme.of(context).textTheme.titleLarge,
             ),
             const SizedBox(height: 8),
@@ -1192,12 +1219,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               _searchQuery.isNotEmpty
                   ? 'Try a different search term'
                   : isFavTab
-                      ? 'Tap ♥ on songs to add them here'
-                      : isYouTubeTab
-                          ? 'Search YouTube to play songs ad-free'
-                          : isLocalTab
-                              ? 'Tap + to browse your music files'
-                              : 'Add some music to your Drive folder',
+                  ? 'Tap ♥ on songs to add them here'
+                  : isYouTubeTab
+                  ? 'Search YouTube to play songs ad-free'
+                  : isLocalTab
+                  ? 'Tap + to browse your music files'
+                  : 'Add some music to your Drive folder',
               style: Theme.of(context).textTheme.bodyMedium,
               textAlign: TextAlign.center,
             ),
@@ -1208,25 +1235,31 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   Navigator.of(context).push(
                     PageRouteBuilder(
                       transitionDuration: const Duration(milliseconds: 400),
-                      reverseTransitionDuration: const Duration(milliseconds: 300),
+                      reverseTransitionDuration: const Duration(
+                        milliseconds: 300,
+                      ),
                       pageBuilder: (context, animation, secondaryAnimation) {
                         return const YouTubeSearchScreen();
                       },
-                      transitionsBuilder: (context, animation, secondaryAnimation, child) {
-                        return FadeTransition(
-                          opacity: animation,
-                          child: SlideTransition(
-                            position: Tween<Offset>(
-                              begin: const Offset(0, 0.1),
-                              end: Offset.zero,
-                            ).animate(CurvedAnimation(
-                              parent: animation,
-                              curve: Curves.easeOutCubic,
-                            )),
-                            child: child,
-                          ),
-                        );
-                      },
+                      transitionsBuilder:
+                          (context, animation, secondaryAnimation, child) {
+                            return FadeTransition(
+                              opacity: animation,
+                              child: SlideTransition(
+                                position:
+                                    Tween<Offset>(
+                                      begin: const Offset(0, 0.1),
+                                      end: Offset.zero,
+                                    ).animate(
+                                      CurvedAnimation(
+                                        parent: animation,
+                                        curve: Curves.easeOutCubic,
+                                      ),
+                                    ),
+                                child: child,
+                              ),
+                            );
+                          },
                     ),
                   );
                 },
@@ -1250,13 +1283,17 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Icon(Icons.search_rounded, color: Colors.white, size: 18),
+                      const Icon(
+                        Icons.search_rounded,
+                        color: Colors.white,
+                        size: 18,
+                      ),
                       const SizedBox(width: 8),
                       Text(
                         'Search YouTube',
-                        style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                              color: Colors.white,
-                            ),
+                        style: Theme.of(
+                          context,
+                        ).textTheme.labelLarge?.copyWith(color: Colors.white),
                       ),
                     ],
                   ),
@@ -1279,7 +1316,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Icon(Icons.add_rounded, color: Colors.white, size: 18),
+                      const Icon(
+                        Icons.add_rounded,
+                        color: Colors.white,
+                        size: 18,
+                      ),
                       const SizedBox(width: 8),
                       Text(
                         'Browse Files',
@@ -1308,10 +1349,7 @@ class _AddMusicButton extends StatelessWidget {
   final VoidCallback onAddFiles;
   final VoidCallback onAddFolder;
 
-  const _AddMusicButton({
-    required this.onAddFiles,
-    required this.onAddFolder,
-  });
+  const _AddMusicButton({required this.onAddFiles, required this.onAddFolder});
 
   @override
   Widget build(BuildContext context) {
@@ -1324,9 +1362,7 @@ class _AddMusicButton extends StatelessWidget {
         }
       },
       offset: const Offset(0, 48),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       color: AppColors.surface.withValues(alpha: 0.95),
       elevation: 12,
       shadowColor: AppColors.neonBlue.withValues(alpha: 0.2),
@@ -1335,12 +1371,18 @@ class _AddMusicButton extends StatelessWidget {
           value: 'files',
           child: Row(
             children: [
-              Icon(Icons.audio_file_rounded, color: AppColors.neonBlue, size: 20),
+              Icon(
+                Icons.audio_file_rounded,
+                color: AppColors.neonBlue,
+                size: 20,
+              ),
               const SizedBox(width: 12),
-              Text('Add Music Files',
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: AppColors.textPrimary,
-                      )),
+              Text(
+                'Add Music Files',
+                style: Theme.of(
+                  context,
+                ).textTheme.bodyMedium?.copyWith(color: AppColors.textPrimary),
+              ),
             ],
           ),
         ),
@@ -1350,10 +1392,12 @@ class _AddMusicButton extends StatelessWidget {
             children: [
               Icon(Icons.folder_rounded, color: AppColors.accentCyan, size: 20),
               const SizedBox(width: 12),
-              Text('Add Music Folder',
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: AppColors.textPrimary,
-                      )),
+              Text(
+                'Add Music Folder',
+                style: Theme.of(
+                  context,
+                ).textTheme.bodyMedium?.copyWith(color: AppColors.textPrimary),
+              ),
             ],
           ),
         ),
